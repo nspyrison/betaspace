@@ -1,0 +1,611 @@
+---
+title: "Beta Diversity & Ordination Spaces"
+subtitle: "From Distance Matrices to PCoA and CAP"
+author: "Microbiome Analysis Workshop"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    css: [default, default-fonts]
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+---
+
+# Agenda
+
+.pull-left[
+### Conceptual
+
+1. **Beta Diversity**: What & Why
+2. **Distance Metrics**: Bray-Curtis, Aitchison
+3. **Ordination**: Mapping to 2D space
+
+### Technical
+
+4. **Distance Matrix → PCoA**
+5. **Distance Matrix → CAP**
+6. **Comparison with PCA & LDA**
+]
+
+.pull-right[
+### Applications
+
+7. **Current Practice** (Jie et al. 2017)
+8. **phyloseq Implementation**
+9. **When to use each method**
+]
+
+---
+
+# Beta Diversity: The Concept
+
+## Definition
+
+**Beta diversity** = **β-diversity** = compositional differences between samples
+
+--
+
+.pull-left[
+### Measures Presence/Absence & Abundance
+
+- How different is sample A from sample B?
+- Sample X vs Sample Y: composition differs
+- Accounts for:
+  - Which taxa are present
+  - How abundant they are
+]
+
+.pull-right[
+### Contrasts with Alpha Diversity
+
+| Alpha | Beta |
+|-------|------|
+| **Within** sample | **Between** samples |
+| Richness/Evenness | Compositional difference |
+| One number per sample | Pairwise distances |
+]
+
+---
+
+# Common Beta Diversity Metrics
+
+## Bray-Curtis Dissimilarity
+
+$$d_{BC}(X,Y) = \frac{\sum_i |X_i - Y_i|}{\sum_i (X_i + Y_i)}$$
+
+- Range: 0 (identical) to 1 (completely different)
+- **Abundance-weighted**: high-abundance taxa matter more
+- **Ignores zeros**: doesn't penalize shared absences
+- **Compositional**: abundance ratios matter
+
+---
+
+# Common Beta Diversity Metrics (cont.)
+
+## Aitchison Distance
+
+$$d_{A}(X,Y) = \sqrt{\sum_i \left(\log\frac{X_i}{g(X)} - \log\frac{Y_i}{g(Y)}\right)^2}$$
+
+Where $g(X) = \text{geometric mean}$ of $X$
+
+- **CLR-transformed**: centered log-ratio
+- Accounts for **compositional nature** of microbiome data
+- Better for **sparse, high-dimensional** data
+- Often more powerful in differential abundance tests
+
+---
+
+# The Distance Matrix
+
+## What is it?
+
+A **symmetric matrix** of pairwise distances between all samples.
+
+```{r, eval=FALSE, echo=TRUE}
+# Example with 6 samples
+dist_matrix <- 
+  ┌─────┬──────┬──────┬──────┬──────┐
+  │ 0   │ 0.32 │ 0.45 │ 0.28 │ 0.61 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.32│ 0    │ 0.38 │ 0.29 │ 0.55 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.45│ 0.38 │ 0    │ 0.52 │ 0.18 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.28│ 0.29 │ 0.52 │ 0    │ 0.64 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.61│ 0.55 │ 0.18 │ 0.64 │ 0    │
+  └─────┴──────┴──────┴──────┴──────┘
+```
+
+**Problem**: High-dimensional! Can't visualize 6 samples in their true space.
+
+**Solution**: Ordination → 2D representation preserving these distances.
+
+---
+
+# Ordination: Goal
+
+## Map high-dimensional distances to 2D (or 3D)
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(vegan)
+library(tidyverse)
+
+set.seed(2847)
+# Create synthetic distance example
+dist_example <- as.matrix(dist(matrix(rnorm(18), ncol=3)))
+```
+
+**Original distances** → **2D coordinates**
+
+- Minimize information loss (-- Really?)
+- Preserve relative distances
+- Interpretable axes (-- Really?)
+
+---
+
+# Method 1: Principal Coordinates Analysis (PCoA)
+
+## What it does
+
+- Takes a **distance matrix** as input
+- Decomposes it via eigenvalue decomposition
+- Returns **new axes** (principal coordinates)
+- Each axis explains % of total variance
+
+---
+
+# Method 1: PCoA (Technical Details)
+
+## The Math
+
+1. Start with distance matrix $\mathbf{D}$
+2. Convert to **centered Gram matrix** $\mathbf{G}$
+3. Eigenvalue decomposition: $\mathbf{G} = \mathbf{U}\boldsymbol{\Lambda}\mathbf{U}^T$
+4. **Principal coordinates** = $\mathbf{U}\sqrt{\boldsymbol{\Lambda}}$
+
+## Key Properties
+
+✓ Works with **any distance metric** (Bray-Curtis, Aitchison, etc.)  
+✓ Preserves **pairwise distances** (in lower dims)  
+✓ **Unconstrained**: axes are not explained by metadata  
+✗ First axis not guaranteed to explain most variance  
+✗ Can have **negative eigenvalues** (metric-dependent)
+
+---
+
+# Method 2: Canonical Analysis of Principal Coordinates (CAP)
+
+## What it does
+
+- Takes a **distance matrix** + **metadata variables**
+- Fits **constrained ordination**
+- Axes are linear combinations of metadata
+- Each axis explains conditional % variance
+
+---
+
+# Method 2: CAP (Technical Details)
+
+## The Process
+
+1. Start with distance matrix $\mathbf{D}$
+2. Compute **PCoA** (axes from $\mathbf{D}$)
+3. **Constrain** PCoA axes to metadata via **RDA**
+4. Retain axes that maximize correlation with constraints
+
+## Key Properties
+
+✓ **Interpretable axes**: tied to metadata  
+✓ Tests whether metadata explains composition differences  
+✓ Can use **PERMANOVA** to test significance  
+✗ Requires metadata to be meaningful  
+✗ Axes may explain less variance than unconstrained methods  
+
+---
+
+# Method 3: Principal Component Analysis (PCA)
+
+## What it does
+
+- Takes **abundance table** directly
+- No distance metric required
+- Finds **axes of maximum variance** in abundance space
+- Common for exploratory analysis
+
+---
+
+# Comparison: nxp Data Processing
+
+|   | PCA | LDA | PCoA | CAP |
+|---|-----|-----|------|-----|
+| **Input** | Abundance table (n × p) | Abundance table + metadata | Distance matrix (n × n) | Distance matrix + metadata |
+| **Distance metric** | None (Euclidean implicit) | None (Euclidean implicit) | Any (Bray, Aitchison, etc.) | Any (Bray, Aitchison, etc.) |
+| **Eigenvalues** | Always ≥ 0 | Always ≥ 0 | Can be negative | Can be negative |
+| **First axis captures** | Max variance in abundance | Separation between clusters | Best approximate distances | Metadata-constrained variance |
+| **Handles compositional data** | Not well | Not well | Yes (metric-dependent) | Yes (metric-dependent) |
+| **Requires metadata** | No |  Yes (required) | No | Yes (required) |
+| **Linear basis** | Yes | Yes | No (projects sites somehow) | No (projects sites somehow) |
+
+---
+
+# PCA: The Old School
+
+## n samples × p taxa
+
+```
+┌───────────────────────────────────┐
+│ Sample₁: [0.3, 0.1, 0.5, ...]     │
+│ Sample₂: [0.2, 0.4, 0.3, ...]     │
+│ Sample₃: [0.1, 0.2, 0.6, ...]     │
+│ ...                               │
+└───────────────────────────────────┘
+
+PCA:
+┌────────────────────────────────────────────┐
+│ Find axes maximizing variance in original  │
+│ abundance dimensions                       │
+│                                            │
+│ PC1 = 0.5 × taxa₁ + 0.3 × taxa₂ + ...    │
+│ PC2 = -0.2 × taxa₁ + 0.6 × taxa₃ + ...   │
+└────────────────────────────────────────────┘
+```
+
+**Problem**: Ignores **compositional nature** of microbiome (sum-to-one constraints)
+
+---
+
+# PCoA: From Distances
+
+## Distance matrix (n × n)
+
+```
+      S1    S2    S3
+S1  [ 0.0  0.32  0.45 ]
+S2  [ 0.32  0.0  0.38 ]
+S3  [ 0.45  0.38  0.0 ]
+
+PCoA:
+┌──────────────────────────────────────────────┐
+│ Decompose distance matrix via eigenanalysis  │
+│ Preserve pairwise distances in lower dims    │
+│                                              │
+│ PC1: [-0.25, 0.10, 0.15]  (explains 45%)    │
+│ PC2: [0.18, -0.32, 0.14]  (explains 30%)    │
+└──────────────────────────────────────────────┘
+```
+
+**Advantage**: Works with **any distance metric**, including compositionally-aware ones
+
+---
+
+# CAP: Adding Metadata
+
+## Distance matrix + constraints
+
+```
+      S1    S2    S3
+S1  [ 0.0  0.32  0.45 ]
+S2  [ 0.32  0.0  0.38 ]
+S3  [ 0.45  0.38  0.0 ]
+
+Metadata:
+S1: ACVD=0, Age=45
+S2: ACVD=1, Age=52
+S3: ACVD=0, Age=48
+
+CAP:
+┌─────────────────────────────────────────────┐
+│ Project samples to metadata-constrained     │
+│ ordination space using RDA                  │
+│                                             │
+│ CAP1: Explains ACVD + Age (67% of variance)│
+│ CAP2: Residual variation (20%)              │
+└─────────────────────────────────────────────┘
+```
+
+**Advantage**: Test whether metadata predicts composition
+
+---
+
+# Jie et al. 2017: Current Practice
+
+## Study Design
+
+- **Samples**: 385 Chinese individuals
+- **Groups**: Healthy vs ACVD (artherosclerotic CVD)
+- **Sequencing**: MetaPhlAn species-level abundances
+- **Beta diversity metric**: Bray-Curtis
+
+---
+
+# Jie et al. 2017: Analysis Pipeline
+
+```
+1. Load abundance data (MetaPhlAn species profiles)
+   ↓
+2. Calculate Bray-Curtis distance matrix
+   ↓
+3. PCoA ordination (unconstrained)
+   ↓
+4. Visualize: PC1 vs PC2 colored by ACVD status
+   ↓
+5. PERMANOVA: Test if ACVD explains composition
+   ↓
+6. Beta-dispersion: Test if groups have different spread
+```
+
+---
+
+# Implementation: phyloseq
+
+## Workflow in R
+
+```{r, eval=TRUE, echo=FALSE}
+library(phyloseq)
+library(vegan)
+
+# Load phyloseq object
+physeq <- metaphlan_physeq(metadata_file = metadata_file,
+                           metaphlan_file = metaphlan_unclass,
+                           sample_header = 'SRA',
+                           rm_samples = c(bad_samples, 'ERR2017627'))
+
+# 1. Calculate Bray-Curtis distance
+dist_matrix <- phyloseq::distance(physeq, method = "bray")
+
+# 2. PCoA ordination
+pcoa_result <- phyloseq::ordinate(
+  physeq, 
+  method = "PCoA",
+  distance = "bray"
+)
+
+# 3. Extract coordinates
+pcoords <- scores(pcoa_result)
+
+# 4. Plot
+plot_ordination(physeq, pcoa_result, color = "ACVD")
+```
+
+---
+
+# Implementation: CAP in phyloseq
+
+## Constrained Ordination
+
+```{r, eval=TRUE, echo=FALSE}
+# CAP with metadata constraints
+cap_result <- phyloseq::ordinate(
+  physeq,
+  method = "CAP",
+  distance = "bray",
+  formula = ~ ACVD + Age + Gender
+)
+
+# Extract variance explained
+# (shows % explained by constraints)
+cap_result$inertia$constrained_perc
+
+# Test significance (PERMANOVA)
+anova(cap_result)
+
+# Plot
+plot_ordination(physeq, cap_result, color = "ACVD")
+```
+
+---
+
+# Implementation: Aitchison Distance
+
+## Compositionally-aware PCoA
+
+```{r, eval=TRUE, echo=FALSE}
+# Using microViz for modern workflow
+physeq |>
+  tax_transform("identity", rank = "Species") |>
+  dist_calc(dist = "aitchison") |>
+  ord_calc("PCoA") |>
+  ord_plot(color = "ACVD")
+
+# Under the hood:
+# 1. CLR-transform abundances
+# 2. Compute Euclidean distance
+# 3. PCoA on Euclidean distances
+```
+
+---
+
+# Jie et al. 2017: Results Interpretation
+
+## PCoA Plot (Bray-Curtis)
+
+```{r, eval=TRUE, echo=FALSE}
+# From ACVD_reprex.Rmd (line 515)
+physeq.beta <- phyloseq::ordinate(
+  full_meta, 
+  method = 'PCoA', 
+  distance = 'bray'
+)
+
+pca.plot <- ggplot(pca.df) +
+  geom_point(aes(x = PCoA1, y = PCoA2, color = ACVD), size = 2.5) +
+  stat_ellipse(aes(x = PCoA1, y = PCoA2, color = ACVD), 
+               level = 0.99) +
+  xlab(paste0("PC1 (", round(percent_explained[1], 1), "%)"))
+```
+
+**Finding**: Modest separation by ACVD status, ellipses overlap considerably
+
+---
+
+# Jie et al. 2017: Statistical Testing
+
+## PERMANOVA Results
+
+```{r, eval=FALSE, echo=TRUE}
+# From ACVD_reprex.Rmd (line 570)
+permanova_result1 <- vegan::adonis2(
+  dist_matrix ~ ACVD + Age + Gender,
+  method = "bray", 
+  data = beta_metadata
+)
+```
+
+**Findings**:
+- ACVD significant (p < 0.05) 
+- **R² = 2%**: Only 2% of variance explained
+- Age also significant
+- Gender: not significant
+- **Interpretation**: Differences exist but are small
+
+---
+
+# Jie et al. 2017: Beta-Dispersion
+
+## Are groups equally "spread out"?
+
+```{r, eval=FALSE, echo=TRUE}
+# From ACVD_reprex.Rmd (line 575)
+beta_dispersion1 <- vegan::betadisper(
+  dist_matrix, 
+  beta_metadata$ACVD
+)
+
+anova_betadisper1 <- vegan::permutest(
+  beta_dispersion1, 
+  pairwise = FALSE
+)
+```
+
+**Tests**: Do healthy vs ACVD groups have equal within-group distances?
+
+- **Significant result**: Unequal dispersion
+- **Interpretation**: Healthy samples more/less variable in composition
+
+---
+
+# When to Use Each Method
+
+## Quick Decision Tree
+
+```
+                ┌─ Input: Abundance table
+                │         └─ PCA (exploratory)
+        Start ──┤
+                └─ Input: Distance matrix
+                   ├─ No metadata → PCoA (unconstrained)
+                   └─ Have metadata
+                      └─ Test metadata effect? 
+                         ├─ Yes → CAP (hypothesis test)
+                         └─ Visualize only → PCoA
+```
+
+---
+
+# PCA vs PCoA vs CAP: Summary
+
+| Task | Best Method | Reason |
+|------|-------------|--------|
+| Quick exploration | **PCA** | Fast, intuitive, directly interpretable |
+| Compare with Bray-Curtis | **PCoA** | Works with ecologically meaningful distance |
+| Test if metadata explains beta diversity | **CAP** | Hypothesis-driven, PERMANOVA-testable |
+| Compositional robustness | **PCoA + Aitchison** | Handles sum-to-one constraint |
+| Publication-quality beta diversity plots | **PCoA** | Standard in microbiome literature |
+
+---
+
+# Key Takeaways
+
+### Beta Diversity Measures Composition Differences
+
+- Bray-Curtis: Traditional, abundance-weighted
+- Aitchison: Compositionally-aware, recommended for sparse data
+
+### Ordination Maps High-D Distances to 2D
+
+- **PCA**: Works on abundance table directly
+- **PCoA**: Works on any distance metric
+- **CAP**: Adds metadata constraints for hypothesis testing
+
+### Jie et al. 2017 Pattern
+
+- Used **Bray-Curtis + PCoA** (current standard)
+- Small R² in PERMANOVA (2% variance explained)
+- Significant but modest compositional differences between groups
+
+---
+
+# Resources & References
+
+### Key Papers
+
+- **Jie et al. 2017**: doi: 10.1038/s41467-017-00900-1
+- **Aitchison (1986)**: Statistical Analysis of Compositional Data
+- **Ramette (2007)**: Multivariate analyses in microbial ecology
+
+### R Packages
+
+- `phyloseq`: Microbiome data structures & plotting
+- `vegan`: Ordination methods (PCoA, CAP, PERMANOVA)
+- `microViz`: Modern tidy workflows
+
+### This Workshop
+
+- **ACVD_reprex.Rmd**: Full reproducible example
+- **1a_vegan_ordination.R**: Utility functions
+
+---
+class: center, middle
+
+# Questions?
+
+---
+
+# Appendix: Behind the PCoA Curtain
+
+## Eigenvalue Interpretation
+
+```{r, eval=FALSE, echo=TRUE}
+# PCoA eigenvalues show variance captured
+eigenvalues <- pcoa_result$values$Eigenvalues
+percent_explained <- eigenvalues / sum(eigenvalues) * 100
+
+# Example output:
+# PC1: 8.2% of variance explained
+# PC2: 5.1% of variance explained
+# PC3: 4.3% of variance explained
+# ...
+
+# Note: Not necessarily decreasing!
+# Because we're preserving pairwise distances,
+# not maximizing variance like PCA does.
+```
+
+---
+
+# Appendix: CAP vs RDA
+
+## Relationship
+
+**CAP** = **RDA** applied to **PCoA axes**
+
+```
+Distance Matrix
+       ↓
+    PCoA ←─── Eigenvalue decomposition
+       ↓
+   PCoA axes (unconstrained)
+       ↓
+    RDA ←─── Constrain to metadata
+       ↓
+  CAP axes (constrained)
+```
+
+- RDA: Directly on abundance-derived distance
+- CAP: On PCoA axes of user-specified distance
+
+**Result**: CAP more flexible (any distance metric)

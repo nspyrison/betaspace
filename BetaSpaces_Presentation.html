@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Beta Diversity &amp; Ordination Spaces</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Microbiome Analysis Workshop" />
+    <meta name="date" content="2026-06-20" />
+    <script src="BetaSpaces_Presentation_files/header-attrs-2.31/header-attrs.js"></script>
+    <link href="BetaSpaces_Presentation_files/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="BetaSpaces_Presentation_files/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+.title[
+# Beta Diversity &amp; Ordination Spaces
+]
+.subtitle[
+## From Distance Matrices to PCoA and CAP
+]
+.author[
+### Microbiome Analysis Workshop
+]
+.date[
+### 2026-06-20
+]
+
+---
+
+
+# Agenda
+
+.pull-left[
+### Conceptual
+
+1. **Beta Diversity**: What &amp; Why
+2. **Distance Metrics**: Bray-Curtis, Aitchison
+3. **Ordination**: Mapping to 2D space
+
+### Technical
+
+4. **Distance Matrix → PCoA**
+5. **Distance Matrix → CAP**
+6. **Comparison with PCA &amp; LDA**
+]
+
+.pull-right[
+### Applications
+
+7. **Current Practice** (Jie et al. 2017)
+8. **phyloseq Implementation**
+9. **When to use each method**
+]
+
+---
+
+# Beta Diversity: The Concept
+
+## Definition
+
+**Beta diversity** = **β-diversity** = compositional differences between samples
+
+--
+
+.pull-left[
+### Measures Presence/Absence &amp; Abundance
+
+- How different is sample A from sample B?
+- Sample X vs Sample Y: composition differs
+- Accounts for:
+  - Which taxa are present
+  - How abundant they are
+]
+
+.pull-right[
+### Contrasts with Alpha Diversity
+
+| Alpha | Beta |
+|-------|------|
+| **Within** sample | **Between** samples |
+| Richness/Evenness | Compositional difference |
+| One number per sample | Pairwise distances |
+]
+
+---
+
+# Common Beta Diversity Metrics
+
+## Bray-Curtis Dissimilarity
+
+`$$d_{BC}(X,Y) = \frac{\sum_i |X_i - Y_i|}{\sum_i (X_i + Y_i)}$$`
+
+- Range: 0 (identical) to 1 (completely different)
+- **Abundance-weighted**: high-abundance taxa matter more
+- **Ignores zeros**: doesn't penalize shared absences
+- **Compositional**: abundance ratios matter
+
+---
+
+# Common Beta Diversity Metrics (cont.)
+
+## Aitchison Distance
+
+`$$d_{A}(X,Y) = \sqrt{\sum_i \left(\log\frac{X_i}{g(X)} - \log\frac{Y_i}{g(Y)}\right)^2}$$`
+
+Where `\(g(X) = \text{geometric mean}\)` of `\(X\)`
+
+- **CLR-transformed**: centered log-ratio
+- Accounts for **compositional nature** of microbiome data
+- Better for **sparse, high-dimensional** data
+- Often more powerful in differential abundance tests
+
+---
+
+# The Distance Matrix
+
+## What is it?
+
+A **symmetric matrix** of pairwise distances between all samples.
+
+
+``` r
+# Example with 6 samples
+dist_matrix &lt;- 
+  ┌─────┬──────┬──────┬──────┬──────┐
+  │ 0   │ 0.32 │ 0.45 │ 0.28 │ 0.61 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.32│ 0    │ 0.38 │ 0.29 │ 0.55 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.45│ 0.38 │ 0    │ 0.52 │ 0.18 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.28│ 0.29 │ 0.52 │ 0    │ 0.64 │
+  ├─────┼──────┼──────┼──────┼──────┤
+  │ 0.61│ 0.55 │ 0.18 │ 0.64 │ 0    │
+  └─────┴──────┴──────┴──────┴──────┘
+```
+
+**Problem**: High-dimensional! Can't visualize 6 samples in their true space.
+
+**Solution**: Ordination → 2D representation preserving these distances.
+
+---
+
+# Ordination: Goal
+
+## Map high-dimensional distances to 2D (or 3D)
+
+
+
+**Original distances** → **2D coordinates**
+
+- Minimize information loss
+- Preserve relative distances
+- Interpretable axes
+
+---
+
+# Method 1: Principal Coordinates Analysis (PCoA)
+
+## What it does
+
+- Takes a **distance matrix** as input
+- Decomposes it via eigenvalue decomposition
+- Returns **new axes** (principal coordinates)
+- Each axis explains % of total variance
+
+---
+
+# Method 1: PCoA (Technical Details)
+
+## The Math
+
+1. Start with distance matrix `\(\mathbf{D}\)`
+2. Convert to **centered Gram matrix** `\(\mathbf{G}\)`
+3. Eigenvalue decomposition: `\(\mathbf{G} = \mathbf{U}\boldsymbol{\Lambda}\mathbf{U}^T\)`
+4. **Principal coordinates** = `\(\mathbf{U}\sqrt{\boldsymbol{\Lambda}}\)`
+
+## Key Properties
+
+✓ Works with **any distance metric** (Bray-Curtis, Aitchison, etc.)  
+✓ Preserves **pairwise distances** (in lower dims)  
+✓ **Unconstrained**: axes are not explained by metadata  
+✗ First axis not guaranteed to explain most variance  
+✗ Can have **negative eigenvalues** (metric-dependent)
+
+---
+
+# Method 2: Canonical Analysis of Principal Coordinates (CAP)
+
+## What it does
+
+- Takes a **distance matrix** + **metadata variables**
+- Fits **constrained ordination**
+- Axes are linear combinations of metadata
+- Each axis explains conditional % variance
+
+---
+
+# Method 2: CAP (Technical Details)
+
+## The Process
+
+1. Start with distance matrix `\(\mathbf{D}\)`
+2. Compute **PCoA** (axes from `\(\mathbf{D}\)`)
+3. **Constrain** PCoA axes to metadata via **RDA**
+4. Retain axes that maximize correlation with constraints
+
+## Key Properties
+
+✓ **Interpretable axes**: tied to metadata  
+✓ Tests whether metadata explains composition differences  
+✓ Can use **PERMANOVA** to test significance  
+✗ Requires metadata to be meaningful  
+✗ Axes may explain less variance than unconstrained methods  
+
+---
+
+# Method 3: Principal Component Analysis (PCA)
+
+## What it does
+
+- Takes **abundance table** directly
+- No distance metric required
+- Finds **axes of maximum variance** in abundance space
+- Common for exploratory analysis
+
+---
+
+# Comparison: nxp Data Processing
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Aspect &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PCA &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PCoA &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; CAP &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Input &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Abundance table (n × p) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Distance matrix (n × n) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Distance matrix + metadata &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Distance metric &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; None (Euclidean implicit) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Any (Bray, Aitchison, etc.) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Any (Bray, Aitchison, etc.) &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Eigenvalues &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Always ≥ 0 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Can be negative &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Can be negative &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; First axis captures &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Max variance in abundance &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Best approximate distances &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Metadata-constrained variance &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Handles compositional data &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Not well &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes (metric-dependent) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes (metric-dependent) &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Requires metadata &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; No &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; No &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes (required) &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Good for visualization &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Good for hypothesis testing &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Limited &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+# PCA: The Old School
+
+## n samples × p taxa
+
+```
+┌───────────────────────────────────┐
+│ Sample₁: [0.3, 0.1, 0.5, ...]    │
+│ Sample₂: [0.2, 0.4, 0.3, ...]    │
+│ Sample₃: [0.1, 0.2, 0.6, ...]    │
+│ ...                               │
+└───────────────────────────────────┘
+
+PCA:
+┌────────────────────────────────────────────┐
+│ Find axes maximizing variance in original  │
+│ abundance dimensions                       │
+│                                            │
+│ PC1 = 0.5 × taxa₁ + 0.3 × taxa₂ + ...    │
+│ PC2 = -0.2 × taxa₁ + 0.6 × taxa₃ + ...   │
+└────────────────────────────────────────────┘
+```
+
+**Problem**: Ignores **compositional nature** of microbiome (sum-to-one constraints)
+
+---
+
+# PCoA: From Distances
+
+## Distance matrix (n × n)
+
+```
+      S1    S2    S3
+S1  [ 0.0  0.32  0.45 ]
+S2  [ 0.32  0.0  0.38 ]
+S3  [ 0.45  0.38  0.0 ]
+
+PCoA:
+┌──────────────────────────────────────────────┐
+│ Decompose distance matrix via eigenanalysis  │
+│ Preserve pairwise distances in lower dims    │
+│                                              │
+│ PC1: [-0.25, 0.10, 0.15]  (explains 45%)    │
+│ PC2: [0.18, -0.32, 0.14]  (explains 30%)    │
+└──────────────────────────────────────────────┘
+```
+
+**Advantage**: Works with **any distance metric**, including compositionally-aware ones
+
+---
+
+# CAP: Adding Metadata
+
+## Distance matrix + constraints
+
+```
+      S1    S2    S3
+S1  [ 0.0  0.32  0.45 ]
+S2  [ 0.32  0.0  0.38 ]
+S3  [ 0.45  0.38  0.0 ]
+
+Metadata:
+S1: ACVD=0, Age=45
+S2: ACVD=1, Age=52
+S3: ACVD=0, Age=48
+
+CAP:
+┌─────────────────────────────────────────────┐
+│ Project samples to metadata-constrained     │
+│ ordination space using RDA                  │
+│                                             │
+│ CAP1: Explains ACVD + Age (67% of variance)│
+│ CAP2: Residual variation (20%)              │
+└─────────────────────────────────────────────┘
+```
+
+**Advantage**: Test whether metadata predicts composition
+
+---
+
+# Jie et al. 2017: Current Practice
+
+## Study Design
+
+- **Samples**: 385 Chinese individuals
+- **Groups**: Healthy vs ACVD (artherosclerotic CVD)
+- **Sequencing**: MetaPhlAn species-level abundances
+- **Beta diversity metric**: Bray-Curtis
+
+---
+
+# Jie et al. 2017: Analysis Pipeline
+
+```
+1. Load abundance data (MetaPhlAn species profiles)
+   ↓
+2. Calculate Bray-Curtis distance matrix
+   ↓
+3. PCoA ordination (unconstrained)
+   ↓
+4. Visualize: PC1 vs PC2 colored by ACVD status
+   ↓
+5. PERMANOVA: Test if ACVD explains composition
+   ↓
+6. Beta-dispersion: Test if groups have different spread
+```
+
+---
+
+# Implementation: phyloseq
+
+## Workflow in R
+
+
+``` r
+library(phyloseq)
+library(vegan)
+
+# Load phyloseq object
+physeq &lt;- # your data
+
+# 1. Calculate Bray-Curtis distance
+dist_matrix &lt;- phyloseq::distance(physeq, method = "bray")
+
+# 2. PCoA ordination
+pcoa_result &lt;- phyloseq::ordinate(
+  physeq, 
+  method = "PCoA",
+  distance = "bray"
+)
+
+# 3. Extract coordinates
+pcoords &lt;- scores(pcoa_result)
+
+# 4. Plot
+plot_ordination(physeq, pcoa_result, color = "ACVD")
+```
+
+---
+
+# Implementation: CAP in phyloseq
+
+## Constrained Ordination
+
+
+``` r
+# CAP with metadata constraints
+cap_result &lt;- phyloseq::ordinate(
+  physeq,
+  method = "CAP",
+  distance = "bray",
+  formula = ~ ACVD + Age + Gender
+)
+
+# Extract variance explained
+# (shows % explained by constraints)
+cap_result$inertia$constrained_perc
+
+# Test significance (PERMANOVA)
+anova(cap_result)
+
+# Plot
+plot_ordination(physeq, cap_result, color = "ACVD")
+```
+
+---
+
+# Implementation: Aitchison Distance
+
+## Compositionally-aware PCoA
+
+
+``` r
+# Using microViz for modern workflow
+physeq |&gt;
+  tax_transform("identity", rank = "Species") |&gt;
+  dist_calc(dist = "aitchison") |&gt;
+  ord_calc("PCoA") |&gt;
+  ord_plot(color = "ACVD")
+
+# Under the hood:
+# 1. CLR-transform abundances
+# 2. Compute Euclidean distance
+# 3. PCoA on Euclidean distances
+```
+
+---
+
+# Jie et al. 2017: Results Interpretation
+
+## PCoA Plot (Bray-Curtis)
+
+
+``` r
+# From ACVD_reprex.Rmd (line 515)
+physeq.beta &lt;- phyloseq::ordinate(
+  full_meta, 
+  method = 'PCoA', 
+  distance = 'bray'
+)
+
+pca.plot &lt;- ggplot(pca.df) +
+  geom_point(aes(x = PCoA1, y = PCoA2, color = ACVD), size = 2.5) +
+  stat_ellipse(aes(x = PCoA1, y = PCoA2, color = ACVD), 
+               level = 0.99) +
+  xlab(paste0("PC1 (", round(percent_explained[1], 1), "%)"))
+```
+
+**Finding**: Modest separation by ACVD status, ellipses overlap considerably
+
+---
+
+# Jie et al. 2017: Statistical Testing
+
+## PERMANOVA Results
+
+
+``` r
+# From ACVD_reprex.Rmd (line 570)
+permanova_result1 &lt;- vegan::adonis2(
+  dist_matrix ~ ACVD + Age + Gender,
+  method = "bray", 
+  data = beta_metadata
+)
+```
+
+**Findings**:
+- ACVD significant (p &lt; 0.05) 
+- **R² = 2%**: Only 2% of variance explained
+- Age also significant
+- Gender: not significant
+- **Interpretation**: Differences exist but are small
+
+---
+
+# Jie et al. 2017: Beta-Dispersion
+
+## Are groups equally "spread out"?
+
+
+``` r
+# From ACVD_reprex.Rmd (line 575)
+beta_dispersion1 &lt;- vegan::betadisper(
+  dist_matrix, 
+  beta_metadata$ACVD
+)
+
+anova_betadisper1 &lt;- vegan::permutest(
+  beta_dispersion1, 
+  pairwise = FALSE
+)
+```
+
+**Tests**: Do healthy vs ACVD groups have equal within-group distances?
+
+- **Significant result**: Unequal dispersion
+- **Interpretation**: Healthy samples more/less variable in composition
+
+---
+
+# When to Use Each Method
+
+## Quick Decision Tree
+
+```
+                ┌─ Input: Abundance table
+                │         └─ PCA (exploratory)
+        Start ──┤
+                └─ Input: Distance matrix
+                   ├─ No metadata → PCoA (unconstrained)
+                   └─ Have metadata
+                      └─ Test metadata effect? 
+                         ├─ Yes → CAP (hypothesis test)
+                         └─ Visualize only → PCoA
+```
+
+---
+
+# PCA vs PCoA vs CAP: Summary
+
+| Task | Best Method | Reason |
+|------|-------------|--------|
+| Quick exploration | **PCA** | Fast, intuitive, directly interpretable |
+| Compare with Bray-Curtis | **PCoA** | Works with ecologically meaningful distance |
+| Test if metadata explains beta diversity | **CAP** | Hypothesis-driven, PERMANOVA-testable |
+| Compositional robustness | **PCoA + Aitchison** | Handles sum-to-one constraint |
+| Publication-quality beta diversity plots | **PCoA** | Standard in microbiome literature |
+
+---
+
+# Key Takeaways
+
+### Beta Diversity Measures Composition Differences
+
+- Bray-Curtis: Traditional, abundance-weighted
+- Aitchison: Compositionally-aware, recommended for sparse data
+
+### Ordination Maps High-D Distances to 2D
+
+- **PCA**: Works on abundance table directly
+- **PCoA**: Works on any distance metric
+- **CAP**: Adds metadata constraints for hypothesis testing
+
+### Jie et al. 2017 Pattern
+
+- Used **Bray-Curtis + PCoA** (current standard)
+- Small R² in PERMANOVA (2% variance explained)
+- Significant but modest compositional differences between groups
+
+---
+
+# Resources &amp; References
+
+### Key Papers
+
+- **Jie et al. 2017**: doi: 10.1038/s41467-017-00900-1
+- **Aitchison (1986)**: Statistical Analysis of Compositional Data
+- **Ramette (2007)**: Multivariate analyses in microbial ecology
+
+### R Packages
+
+- `phyloseq`: Microbiome data structures &amp; plotting
+- `vegan`: Ordination methods (PCoA, CAP, PERMANOVA)
+- `microViz`: Modern tidy workflows
+
+### This Workshop
+
+- **ACVD_reprex.Rmd**: Full reproducible example
+- **1a_vegan_ordination.R**: Utility functions
+
+---
+class: center, middle
+
+# Questions?
+
+---
+
+# Appendix: Behind the PCoA Curtain
+
+## Eigenvalue Interpretation
+
+
+``` r
+# PCoA eigenvalues show variance captured
+eigenvalues &lt;- pcoa_result$values$Eigenvalues
+percent_explained &lt;- eigenvalues / sum(eigenvalues) * 100
+
+# Example output:
+# PC1: 8.2% of variance explained
+# PC2: 5.1% of variance explained
+# PC3: 4.3% of variance explained
+# ...
+
+# Note: Not necessarily decreasing!
+# Because we're preserving pairwise distances,
+# not maximizing variance like PCA does.
+```
+
+---
+
+# Appendix: CAP vs RDA
+
+## Relationship
+
+**CAP** = **RDA** applied to **PCoA axes**
+
+```
+Distance Matrix
+       ↓
+    PCoA ←─── Eigenvalue decomposition
+       ↓
+   PCoA axes (unconstrained)
+       ↓
+    RDA ←─── Constrain to metadata
+       ↓
+  CAP axes (constrained)
+```
+
+- RDA: Directly on abundance-derived distance
+- CAP: On PCoA axes of user-specified distance
+
+**Result**: CAP more flexible (any distance metric)
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+  "highlightStyle": "github",
+  "highlightLines": true,
+  "countIncrementalSlides": false,
+  "ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+// add `data-at-shortcutkeys` attribute to <body> to resolve conflicts with JAWS
+// screen reader (see PR #262)
+(function(d) {
+  let res = {};
+  d.querySelectorAll('.remark-help-content table tr').forEach(tr => {
+    const t = tr.querySelector('td:nth-child(2)').innerText;
+    tr.querySelectorAll('td:first-child .key').forEach(key => {
+      const k = key.innerText;
+      if (/^[a-z]$/.test(k)) res[k] = t;  // must be a single letter (key)
+    });
+  });
+  d.body.setAttribute('data-at-shortcutkeys', JSON.stringify(res));
+})(document);
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

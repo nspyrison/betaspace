@@ -1,0 +1,700 @@
+# ACVD_SMG_minimal_reprex -----
+
+# Setup -----
+{
+  tictoc::tic("Setup")
+  metadata_file <- './zGitIgnore/ACVD_Inputs/inputs/Jieetal_2017_supp.txt'
+  read_summary <- './zGitIgnore/ACVD_Inputs//inputs/Read_counts_quality.txt'
+  metaphlan_unclass <- './zGitIgnore/ACVD_Inputs//inputs/merged_metaphlan_count_species_wUnclass.txt'
+  stopifnot(all(file.exists(c(metadata_file, read_summary, metaphlan_unclass))))
+  
+  ## Lib -----
+  if(!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+  if(!require("maaslin3", quietly = TRUE))
+    BiocManager::install("maaslin3")
+  if(!require("microViz", quietly = TRUE))
+    pak::pak("david-barnett/microViz")
+  
+  suppressPackageStartupMessages({
+    library(microbiome)
+    library(dplyr)
+    library(tidyr)
+    library(ggplot2)
+    library(RColorBrewer)
+    library(stringr)
+    library(ggpubr)
+    library(DT)
+    library(knitr)
+    library(kableExtra)
+    library(plotly)
+    library(grid)
+    library(shiny)
+    library(viridis)
+    library(maaslin3)
+    library(tibble)
+    library(microViz)
+    library(phyloseq)
+    
+    library(tictoc)
+  })
+  
+  my_gg_theme <- theme_bw() +
+    theme(
+      axis.text = element_text(size=10),
+      axis.title = element_text(size=10,face='bold'),
+      legend.text = element_text(size=10),
+      legend.title = element_text(size=10,face='bold'))
+  acvd_colors <- viridis(2,option="A",begin=0.3,end=0.7)
+  
+  ## Funcs ----
+  
+  metaphlan_physeq <- function(metadata_file,
+                               metaphlan_file,
+                               sample_header='SRA',
+                               rm_samples = c()){
+    
+    ##Import metadata
+    df_metadata <- read.delim (metadata_file,
+                               header = TRUE,
+                               sep = "\t",
+                               fill = TRUE,
+                               na.strings = c("","NA")) %>%
+      rename('SampleID'={{sample_header}},
+             "TRIG"="TRIG..mmol.L.",
+             "LDLC"="LDLC..mmol.L.",
+             "CHOL"="CHOL..mmol.L.",
+             "HDLC"="HDLC..mmol.L.",
+             "ACVD"="ACVD.status",
+             "Age"="Age..year.",
+             "BMI"="Body.Mass.Index..BMI.") %>%
+      select(SampleID,Gender,Age,ACVD,TRIG,LDLC,HDLC,CHOL,BMI) %>%
+      filter(!SampleID %in% rm_samples)
+    
+    #df_metadata <- df_metadata[sample(nrow(df_metadata), 50),]
+    
+    rownames(df_metadata) <- df_metadata$SampleID
+    META <- phyloseq::sample_data(df_metadata)
+    
+    ##Import metaphlan
+    df_metaphlan <- read.delim (metaphlan_file, 
+                                header = TRUE, 
+                                row.names = 1,
+                                sep = "\t", 
+                                check.names = FALSE,
+                                skip = 1) %>%
+      rename_with(~ str_remove_all(., ".metaphlan"), .cols = everything()) %>%
+      select(!all_of(rm_samples))
+    
+    otu <- data.matrix(df_metaphlan)
+    OTU <- phyloseq::otu_table(otu,
+                               taxa_are_rows = TRUE)
+    
+    rownames <- rownames(df_metaphlan)
+    #Split rownames by | into a new data frame:
+    taxmat <- data.frame(stringr::str_split_fixed(rownames, "\\|",7))
+    colnames(taxmat) = c("Domain", 
+                         "Phylum", 
+                         "Class", 
+                         "Order", 
+                         "Family", 
+                         "Genus", 
+                         "Species")
+    rownames(taxmat) <- rownames(df_metaphlan)
+    taxmat <- apply(taxmat, 
+                    c(1, 2), 
+                    function(x) gsub("^.*__", 
+                                     "", 
+                                     x))
+    taxmat <- as.matrix(taxmat)
+    TAX = phyloseq::tax_table(taxmat)
+    
+    physeq = phyloseq::phyloseq(META,
+                                OTU,
+                                TAX)
+    return(physeq)
+  }
+  
+  
+  calculate_da_genOdds <- function(
+    df, meta, treat = "Treatment", assume_no_effect = FALSE
+  ){
+    df.res <- data.frame(
+      bin = vector(length = ncol(df)),
+      estimate = vector(length = ncol(df)),
+      std.error = vector(length = ncol(df)),
+      p.value = vector(length = ncol(df))
+    )
+    
+    meta <- meta[order(meta$Sample_ID), ]
+    df <- df[order(rownames(df)), , drop = F]
+    
+    for (s in 1:ncol(df)) {
+      taxa <- names(df)[s]
+      if (all(meta$Sample_ID != rownames(df))) {
+        stop("Metadata and Spec abund table are not in the same order")
+      } else {
+        spec.ab <- df[, s]
+        tmp <- cbind.data.frame(spec.ab, meta) # build df with species and metadata
+        x <- try(lo <- genodds(
+          tmp$spec.ab,
+          tmp[, treat],
+          assume_no_effect = assume_no_effect
+        )) # in case of error
+        if (class(x)[1] == "try-error") {
+          df.res[s, "bin"] <- spec
+          df.res[s, "estimate"] <- NA
+          df.res[s, "std.error"] <- NA
+          df.res[s, "p.value"] <- NA
+        } else {
+          df.res[s, "bin"] <- spec
+          df.res[s, "estimate"] <- lo$pooled_lnodds
+          df.res[s, "std.error"] <- lo$pooled_SElnodds
+          df.res[s, "p.value"] <- lo$pooled_p
+        }
+      }
+    }
+    return(df.res)
+  }
+  
+  plot_heatmap_may <- function (
+    x, subset.top, transformation, VariableA, 
+    heatcolors = NULL, ...
+  ){
+    topOTU <- phyobj1 <- phyobj2 <- otu.mat <- NULL
+    meta.tab <- select.meta <- color.heatmap <- NULL
+    x <- suppressWarnings(suppressMessages(microbiomeutilities::format_to_besthit(x)))
+    if (!is.null(subset.top)) {
+      message(paste0("Top ", subset.top, " OTUs selected", 
+                     sep = " "))
+      topOTU <- top_taxa(x, n = subset.top)
+    }
+    else {
+      stop("specify a number/value for subset.top")
+    }
+    if (transformation == "log10") {
+      message("log10, if zeros in data then log10(1+x) will be used")
+      phyobj1 <- prune_taxa(topOTU, x)
+      message("First top taxa were selected and \nthen abundances tranformed to log10(1+X)")
+      phyobj2 <- transform(phyobj1, "log10")
+    }
+    else if (transformation == "compositional") {
+      phyobjx <- transform(x, "compositional")
+      phyobj2 <- prune_taxa(topOTU, phyobjx)
+      message("First converted to compositional \n then top taxa were selected")
+    }
+    else if (transformation == "Z-OTU") {
+      phyobj1 <- prune_taxa(topOTU, x)
+      phyobj2 <- transform(phyobj1, "Z")
+      message("First top taxa were selected and \nthen abundances tranformed to Z values")
+    }
+    else if (transformation == "clr") {
+      phyobj1 <- prune_taxa(topOTU, x)
+      phyobj2 <- transform(phyobj1, "clr")
+      message("First top taxa were selected and \nthen abundances tranformed to clr")
+    }
+    else if (!is.null(transformation)) {
+      stop("specify a number for transformation, log10, compositional, Z-OTU, clr")
+    }
+    otu.mat <- abundances(phyobj2)
+    meta.tab <- meta(phyobj2)
+    select.meta <- subset(meta.tab, select = c(VariableA))
+    if (is.null(heatcolors)) {
+      color.heatmap <- brewer.pal(6, "Spectral")
+    }
+    else {
+      color.heatmap <- heatcolors
+    }
+    newnames0 <- gsub(x=str_split_fixed(rownames(otu.mat), pattern = '\\:', n = 2)[,2],
+                      pattern='g__',
+                      replacement='')
+    newnames <- NULL
+    newnames <- lapply(newnames0, function(x) bquote(italic(.(x))))
+    heatmap <- pheatmap::pheatmap(otu.mat, labels_row = as.expression(newnames), 
+                                  annotation_col = select.meta, color = color.heatmap, 
+                                  ...)
+    return(list(plot = heatmap, tax_tab = otu.mat))
+  }
+  
+  ## Context ----
+  project <- 'NA'
+  proj_desc <- 'Re-analysis of Jie et al, 2017 (10.1038/s41467-017-00900-1) data looking at the gut microbiome in individuals with artherosclerotic cardiovascular disease (ACVD) compared to healthy individuals in a Chinese cohort. Looking for taxa associated with metabolic health with a particular focus on Akkermansia sp.'
+  nsamples <- '385'
+  seq_loc <- 'NA'
+  seqread <- 'PRJEB21528'
+  (context <- tibble(
+    Type=c('Project','Description','Number of Samples','Sequencing Facility',
+           'SeqRead Project','Metadata','Data QC','Taxonomic Abundance'),
+    Value=c(project, proj_desc, nsamples, seq_loc, seqread,
+            basename(metadata_file), basename(read_summary),
+            basename(metaphlan_unclass))
+  ))
+  tictoc::toc()
+}
+# Sequence data -----
+
+## Sequence (read_summary) -----
+{
+  tictoc::tic("Sequence (read_summary)")
+  seq <- read.delim(read_summary) %>%
+    mutate(RawReads = round(RawReads/1e6,1),
+           TrimmedReads = round((TrimmedReads+TrimmedSingles)/1e6,1),
+           FilteredReads = round((FilteredReads+FilteredSingles)/1e6,1),
+           TrimRet = round((TrimmedReads/RawReads)*100,1),
+           FiltRet = round((FilteredReads/RawReads)*100,1)
+    ) %>%
+    select(Sample,
+           'Raw Reads (M)'=RawReads,
+           'Trimmed Reads (M)'=TrimmedReads,
+           'Retained after trimming (% raw)'=TrimRet,
+           'De-contaminated Reads (M)'=FilteredReads,
+           'Retained after filtering (% raw)'=FiltRet
+    ) %>%
+    as_tibble()
+  seq
+  tictoc::toc()
+}
+
+## Quality metrics (read_summary) ----
+{
+  tictoc::tic("Quality metrics (read_summary)")
+  qc_colors <- c('green3','yellow2','orangered2')
+  fastqc <- read.delim(read_summary) %>%
+    select(all_of(c(1,seq(7,16))))
+  col.order <- colnames(fastqc)
+  
+  fastqc.l <- fastqc %>%
+    pivot_longer(cols=-Sample,names_to = 'stat',values_to = 'value') %>%
+    mutate(stat=factor(stat,levels=col.order)) %>%
+    arrange(Sample)
+  
+  fastqc_plot <- ggplot(fastqc.l) +
+    geom_tile(aes(x = stat, y = Sample, fill = value)) +
+    scale_fill_manual(values = qc_colors, breaks = c('PASS', 'WARN', 'FAIL')) +
+    scale_x_discrete(labels = gsub('\\.', ' ', col.order[-1])) +
+    scale_y_discrete(position = 'right') +
+    labs(x="Sampel", y="Statistic") +
+    theme(axis.ticks.y = element_blank(),
+          axis.text.y = element_blank(),
+          #legend.position='none',
+          axis.title = element_blank(),
+          axis.text.x = element_text(angle = -25, hjust = 1))
+  
+  m <- list(
+    #l = 50,
+    #r = 50,
+    b = 50,
+    t = 50,
+    pad = 0.5
+  )
+  ggplotly(fastqc_plot, width = 800, height = 500) %>%
+    layout(autosize = F, margin = m)
+  tictoc::toc()
+}
+
+
+## Reads mapping to unclassified taxa (metaphlan_unclass, metadata_file) ----
+{
+  tictoc::tic("Reads mapping to unclassified taxa (metaphlan_unclass, metadata_file)")
+  df_unclass <- read.delim(
+    metaphlan_unclass, header = TRUE, sep = "\t",
+    check.names = FALSE, skip = 1) %>%
+    rename_with(~ str_remove_all(., ".metaphlan"), .cols = everything()) %>%
+    column_to_rownames(var = 'clade_name') %>%
+    mutate(across(everything(), ~ .x/ sum(.x))) %>%
+    rownames_to_column(var = 'clade_name') %>%
+    filter(clade_name == 'UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED') %>%
+    column_to_rownames(var = 'clade_name')
+  
+  metadata <- read.delim(
+    metadata_file, header = TRUE, sep = "\t", fill = TRUE,
+    na.strings = c("","NA")) %>%
+    rename('SampleID'="SRA",
+           "TRIG"="TRIG..mmol.L.",
+           "LDLC"="LDLC..mmol.L.",
+           "CHOL"="CHOL..mmol.L.",
+           "HDLC"="HDLC..mmol.L.",
+           "ACVD"="ACVD.status",
+           "Age"="Age..year.",
+           "BMI"="Body.Mass.Index..BMI.") %>%
+    select(SampleID,Gender,Age,ACVD,TRIG,LDLC,HDLC,CHOL) %>%
+    mutate(ACVD = factor(ACVD, levels=c('0','1')))
+  
+  unclass_wmeta <- as.data.frame(t(df_unclass)) %>%
+    rownames_to_column(var = 'SampleID') %>%
+    left_join(metadata, by='SampleID') %>%
+    rename('UNCLASSIFIED'='UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED|UNCLASSIFIED') %>%
+    mutate(over40 = case_when(UNCLASSIFIED >= 0.4 ~ 'yes',
+                              TRUE ~ 'no'))
+  
+  bad_samples <- unclass_wmeta %>%
+    filter(UNCLASSIFIED >= 0.4) %>%
+    pull(SampleID)
+  
+  unclass.plot <- ggplot(unclass_wmeta, aes(x=ACVD,y=UNCLASSIFIED*100)) +
+    geom_boxplot(aes(fill=ACVD)) +
+    geom_point(data = unclass_wmeta %>% filter(over40 == 'yes'), aes(group=SampleID), color='red') +
+    scale_fill_manual(values=acvd_colors) +
+    my_gg_theme +
+    labs(y='MetaPhlAn Unclassified (%)') +
+    guides(color = "none")
+  unclass.plot
+  
+  
+  physeq <- metaphlan_physeq(metadata_file = metadata_file,
+                             metaphlan_file = metaphlan_unclass,
+                             sample_header = 'SRA',
+                             rm_samples = c(bad_samples,'ERR2017627'))
+  
+  # make factors
+  metadata <- data.frame(sample_data(physeq)) %>%
+    mutate(ACVD = factor(ACVD, levels = c('0', '1')))
+  sample_data(physeq) <- metadata
+  physeq
+  tictoc::toc()
+}
+
+
+# Analysis ----
+
+## Alpha diversity (physeq(metaphlan_unclass, metadata_file)) ----
+
+# Alpha diversity measures the richness (number of taxa) and evenness (relative abundance) of samples. Observed diversity describes the richness while the Shannon index combines richness and evenness. There are no significant differences in alpha diversity between groups.
+
+{
+  tictoc::tic("Alpha diversity")
+  full_meta <- microViz::ps_filter(physeq, !is.na(Gender) & !is.na(Age), .keep_all_taxa = TRUE)
+  
+  alpha.df <- phyloseq::estimate_richness(
+    full_meta, measures = c("Shannon", "Simpson", "Observed")) %>%
+    as_tibble(rownames = "SampleID") %>%
+    left_join(phyloseq::sample_data(physeq), by='SampleID')
+  
+  alpha.df.l <- alpha.df %>%
+    pivot_longer(cols=-c('SampleID','Gender','Age','ACVD','CHOL','HDLC','LDLC','TRIG','BMI'),
+                 names_to = 'Diversity_Measure',values_to = 'value')
+  
+  alpha.box1 <- ggplot(alpha.df.l) + #%>% filter(Diversity_Measure != 'Simpson')) +
+    geom_boxplot(aes(y=value,fill=ACVD)) +
+    ylab('Alpha Diversity') +
+    scale_fill_manual(values=acvd_colors) +
+    facet_wrap(~Diversity_Measure,scales='free') +
+    my_gg_theme
+  alpha.box1
+  
+  # alpha diversity stats
+  #' @examples
+  print(kruskal.test(data = alpha.df, Observed ~ ACVD))
+  print(kruskal.test(data = alpha.df, Shannon ~ ACVD))
+  print(kruskal.test(data = alpha.df, Simpson ~ ACVD))
+  
+  # wilcox test
+  stats <- compare_means(data = alpha.df, formula = c(Observed, Shannon) ~ ACVD,
+                         p.adjust.method = 'fdr')
+  print(stats)
+  
+  g <- ggplot(alpha.df) +
+    geom_point(aes(x = Observed, y = Shannon, color = ACVD), size = 3) +
+    scale_color_manual(values = acvd_colors) +
+    my_gg_theme
+  plotly::ggplotly(g)
+  tictoc::toc()
+}
+
+
+
+## Beta diversity -----
+
+# Beta diversity assesses differences in microbiome composition between different groups of samples. Bray-Curtis dissimilarity calculates differences using both presence and abundance information.
+
+# bray curtis distance
+physeq.beta <- phyloseq::ordinate(full_meta, method = 'PCoA', distance = 'bray')
+
+p <- physeq %>%
+  tax_transform("identity", rank = "Species") %>%
+  dist_calc(dist = "aitchison") %>%
+  ord_calc("PCoA") %>%
+  ord_plot(color = "ACVD", size = 2) +
+  scale_color_manual(values = acvd_colors) +
+  scale_fill_manual(values = acvd_colors) +
+  #scale_colour_brewer(palette = "Dark2", aesthetics = c("fill", "colour"), name = "ACVD") +
+  theme_bw() +
+  ggside::geom_xsidedensity(aes(fill = ACVD), alpha = 0.5, show.legend = FALSE) +
+  ggside::geom_ysidedensity(aes(fill = ACVD), alpha = 0.5, show.legend = FALSE) +
+  ggside::theme_ggside_void()
+
+pca.df <- data.frame(physeq.beta$vectors)
+pca.df <- data.frame(SampleID = rownames(pca.df),
+                     PCoA1 = pca.df$Axis.1,
+                     PCoA2 = pca.df$Axis.2,
+                     PCoA3 = pca.df$Axis.3)
+
+pca.df <- left_join(pca.df, metadata, by = 'SampleID') %>%
+  mutate(bmi_bin = cut(BMI, breaks = c(0, 18, 25, 30, 35, 40, 50, 70),
+                       include.lowest = TRUE, right = FALSE, dig.lab = 4))
+
+eigenvalues <- physeq.beta$values$Eigenvalues
+percent_explained <- eigenvalues / sum ( eigenvalues ) * 100
+
+# flat plots
+#' @examples
+#' pca.legend <- ggplot(pca.df,aes(color=Treatment, shape=Timepoint)) +
+#'   geom_point()
+#' pca.legend
+
+pca.plot <- ggplot(pca.df) +
+  geom_point(aes(x = PCoA1, y = PCoA2, color = ACVD), size = 2.5) +
+  stat_ellipse(aes(x = PCoA1, y = PCoA2, color = ACVD),
+               level = 0.99, linewidth = 1) +
+  xlab(paste0("PC1 (", round(percent_explained[1], 1), "%)")) +
+  ylab(paste0("PC2 (", round(percent_explained[2], 1), "%)")) +
+  scale_color_manual(values=acvd_colors) +
+  my_gg_theme +
+  labs(subtitle = 'Bray-Curtis Distance')
+pca.plot
+
+#A permutational multivariate analysis of variance (PERMANOVA) is run to assess how differences in community composition can be attributed to different factors (ie disease state, age or gender). In this dataset community composition differs significantly by ACVD status and age, but not by gender. However, the amount of variance (R2) explained by these factors is very low: only 2% of variance is attributable to ACVD status, and <1% to age.
+
+# testing beta diversity using Permanova
+dist_matrix <- phyloseq::distance(full_meta, method = "bray")
+set.seed("2507") #for reproducibility
+beta_metadata <- data.frame(sample_data(full_meta))
+permanova_result1 <- vegan::adonis2(
+  dist_matrix ~ ACVD + Age + Gender,
+  method = "bray", data = beta_metadata, by = "terms", parallel = 4)
+print(permanova_result1)
+
+beta_dispersion1 <- vegan::betadisper(dist_matrix, beta_metadata$ACVD)
+#print(beta_dispersion1)
+
+anova_betadisper1 <- vegan::permutest(beta_dispersion1, pairwise = FALSE, parallel = 4)
+#print(anova_betadisper1)
+
+tukeyhsb_betadisper1 <- TukeyHSD(beta_dispersion1)
+#print(tukeyhsb_betadisper1)
+
+
+## Microbiome Composition Plots ----
+
+### Core taxa by Family
+
+#Taxa filtered by 1% abundance and 20% prevalence and summarized at family level. Relative abundance is averaged by group (ACVD status).
+
+# remove unclassified taxa for plotting core families
+physeq_nounclass <- subset_taxa(physeq, Family != 'UNCLASSIFIED')
+
+# relative abundance - all taxa
+physeq_nounclass_rel <- transform_sample_counts(physeq_nounclass,
+                                                function(x) x / sum(x))
+
+core <- aggregate_rare(physeq_nounclass_rel, level = "Family",
+                       detection = 0.01, prevalence = 0.2)
+core_families <- rownames(tax_table(core))
+mycols <- microViz::distinct_palette(n = length(core_families), pal = 'greenArmytage')
+mycols2 <- setNames(rev(mycols), core_families)
+
+core.plot <- plot_composition(core, otu.sort = "abundance", average_by = 'ACVD') +
+  guides(fill = guide_legend(ncol = 1)) +
+  labs(x = "ACVD",
+       y = "Relative abundance",
+       subtitle = "Abundance = 1%, Prevalence = 20%",
+       fill = 'Family') +
+  my_gg_theme
+
+c1 <- core.plot + scale_fill_manual(values = mycols2)
+ggplotly(c1)
+
+# physeq %>%
+#  ps_mutate(gender_acvd = interaction(Gender, ACVD)) %>%
+#  phyloseq::merge_samples(group = "gender_acvd") %>%
+#  comp_barplot(
+#    tax_level = "Genus", n_taxa = 15,
+#    sample_order = c('male.1','male.0','female.1','female.0'),
+#    bar_width = 0.8
+#  ) +
+# coord_flip() + labs(x = NULL, y = NULL) +
+#  theme(axis.text = element_text(size = 12),
+#        legend.text = element_text(size=12),
+#        legend.title = element_text(size=12,face='bold'))
+
+## Akkermansia ----
+
+physeq_rel <- transform_sample_counts(physeq, function(x) x / sum(x))
+physeq_smg_taxa <- as.data.frame(tax_table(physeq_rel)) %>%
+  rownames_to_column(var = 'metaphlan_species') %>%
+  select(metaphlan_species, Species)
+abd_smg_rel <- as.data.frame(otu_table(physeq_rel)) %>%
+  rownames_to_column(var = 'metaphlan_species') %>%
+  left_join(physeq_smg_taxa, by = 'metaphlan_species') %>%
+  select(-metaphlan_species) %>%
+  column_to_rownames(var = 'Species')
+df_rel <- t(abd_smg_rel)
+
+abd_akks <- data.frame(t(df_rel)) %>%
+  rownames_to_column(var = 'Species') %>%
+  pivot_longer(cols = -c(Species), names_to = 'SampleID', 
+               values_to = 'abundance') %>%
+  filter(str_detect(Species, "^Akkermansia")) %>%
+  left_join(metadata, by = 'SampleID') %>%
+  mutate(abd_perc = abundance*100) %>%
+  filter(Species %in% c("Akkermansia_muciniphila", "Akkermansia_massiliensis",
+                        "Akkermansia_sp_N21116")) %>%
+  mutate(Species = factor(
+    replace(Species, Species == "Akkermansia_sp_N21116", "Akkermansia_guangxiensis"),
+    levels = c("Akkermansia_muciniphila", "Akkermansia_massiliensis",
+               "Akkermansia_guangxiensis")))
+
+abd_akks.w <- abd_akks %>%
+  pivot_wider(id_cols = c(SampleID, ACVD, TRIG, LDLC, HDLC, CHOL),
+              names_from = Species, values_from = abd_perc)
+#write.table(file='./outputs/acvd_abd_akks_w.tsv',abd_akks.w,quote = F,row.names = F,sep='\t')
+
+akk_order <- c("Akkermansia_muciniphila", "Akkermansia_massiliensis", "Akkermansia_guangxiensis")
+
+#This table shows the prevalence and abundance of _Akkermansia_ species in each group (healthy and ACVD). Note that the mean and median relative abundance shown here are calculated including only individuals where the taxon is present (ie when this species is present in an individual, what is its abundance?). Note that comparing MEAN relative abundance between groups provides a different result to comparing MEDIAN relative abundance.
+
+# per age group
+akk_abd_summ <- abd_akks %>%
+  group_by(Species,ACVD) %>%
+  summarize(mean_abd = mean(abd_perc),
+            median_abd = median(abd_perc),
+            .groups = 'drop') %>%
+  mutate(SA = paste(Species,ACVD,sep = '-')) %>%
+  select(SA, mean_abd, median_abd)
+
+akk_abd_summ_no0 <- abd_akks %>%
+  group_by(Species,ACVD) %>%
+  filter(abd_perc > 0) %>%
+  summarize(mean_abd_no0 = mean(abd_perc),
+            median_abd_no0 = median(abd_perc),
+            .groups = 'drop') %>%
+  mutate(SA = paste(Species, ACVD, sep = '-')) %>%
+  select(SA, mean_abd_no0, median_abd_no0)
+
+akk <- left_join(akk_abd_summ,akk_abd_summ_no0,by='SA') %>%
+  separate_wider_delim(SA, delim = '-', names = c('Species','ACVD'),
+                       cols_remove = FALSE) %>%
+  mutate(mean_abd_no0 = replace_na(mean_abd_no0, 0),
+         median_abd_no0 = replace_na(median_abd_no0, 0)) %>%
+  select(SA,mean_abd,mean_abd_no0,median_abd,median_abd_no0)
+
+# prevalence
+prevalence.est <- function(df, taxa.are.rows = T){
+  df$abundance[df$abundance > 0] <- 1
+  samp <- length(unique(df$SampleID))
+  summ <- df %>% group_by(Species, ACVD) %>%
+    summarize(count = sum(abundance), .groups = 'drop')
+  return(summ)
+}
+
+df.prev <- prevalence.est(abd_akks)
+
+prev <- metadata %>% group_by(ACVD) %>%
+  summarize(sample_count = n(), .groups = 'drop') %>%
+  select(ACVD,sample_count)
+
+summ <- df.prev %>%
+  left_join(prev, by = 'ACVD', multiple = 'first') %>%
+  mutate(prevalence = round(count / sample_count * 100, digits = 2)) %>%
+  mutate(SA = paste(Species, ACVD, sep = '-')) %>%
+  left_join(akk, by = 'SA') %>%
+  mutate(mean_abd_rounded = round(mean_abd, 2),
+         mean_abd_no0_rounded = round(mean_abd_no0, 2),
+         median_abd_rounded = round(median_abd, 2),
+         median_abd_no0_rounded = round(median_abd_no0, 2)) %>%
+  mutate(prev_perc_n = paste0(round(prevalence, 0), '% (', count, ')')) %>%
+  select(Species, ACVD,
+         'N' = sample_count,
+         'prevalence(N)' = prev_perc_n,
+         'mean_abundance' = mean_abd_no0_rounded,
+         'median_abundance' = median_abd_no0_rounded)
+
+
+DT::datatable(summ %>% filter(Species %in% c(
+  'Akkermansia_muciniphila', 'Akkermansia_massiliensis', 'Akkermansia_guangxiensis')),
+  caption = htmltools::tags$caption(
+    style = 'caption-side: top; text-align: left; color:black; font-size:150%;',
+    'Akkermansia prevalence and abundance by group and visit'),
+  rownames = FALSE,
+  width = '100%',
+  options = list(
+    scrollX = '500px',
+    scrollY = '300px',
+    paging = FALSE,
+    info = FALSE,
+    initComplete = JS("function(settings, json) {$(this.api().table().header()).css({'font-size' : '14px'});}")
+  )) %>%
+  formatStyle(columns = colnames(.$x$data), `font-size` = '14px')
+
+# Here we are plotting the relative abundance of _Akkermansia_ species broken down by ACVD status: 0 = healthy, 1 = ACVD. Note that the y-axis is on a log scale for visibility.
+
+# With this plot we can see how a comparison of the MEDIANS tells us that the abundance of both _A. muciniphila_ and _A. massiliensis_ are lower in people with ACVD, when compared to healthy individuals. We can also see how my initial comparison of the MEANS was influenced by a few individuals who have abnormally high (>10%) abundance of _A. muciniphila_.
+
+#<a id="akk-box"></a>
+  
+akk_box <- ggplot(abd_akks %>%
+                    filter(Species != 'Akkermansia_biwaensis' & abd_perc > 0),
+                  aes(x = Species, y = abd_perc)) +
+  geom_boxplot(aes(fill = ACVD), outliers = F) +
+  geom_point(aes(group = ACVD), position = position_dodge(width = 0.75),
+             color = 'grey27', alpha = 0.5) +
+  my_gg_theme +
+  scale_y_log10() +
+  scale_fill_manual(values = acvd_colors) +
+  labs(y='Relative abundance (%)')\
+akk_box
+
+# Relative abundance of each Akkermansia sp. scaled to the total Akkermansia abundance plotted only for samples with at least 1 Akkermansia species present. Majority of samples contain only a single species of Akkermansia. Where multiple species are present, one species is usually very dominant, with only a small fraction of a secondary species.
+#library(microViz)
+akk_order <- c('Akkermansia_muciniphila','Akkermansia_massiliensis','Akkermansia_guangxiensis')
+akk_order2 <- c('Akkermansia_muciniphila','Akkermansia_massiliensis','Akkermansia_sp_N21116')
+
+no_akks <- abd_akks.w %>% 
+  mutate(across(all_of(akk_order), as.numeric)) %>%
+  filter(if_all(akk_order, ~ .x == 0)) %>%
+  pull(SampleID)
+
+akk_samp <- abd_akks.w %>% 
+  mutate(across(all_of(akk_order), as.numeric)) %>%
+  filter(!if_all(akk_order, ~ .x == 0)) %>%
+  pull(SampleID)
+
+psq <- physeq %>%
+  tax_fix()
+
+akk <- tax_select(psq, tax_list = 'Akkermansia') %>%
+  ps_filter(!SampleID %in% no_akks) %>%
+  tax_select(tax_list = 'Akkermansia_biwaensis', deselect=TRUE)
+
+cols <- distinct_palette(n = 2, add = NA)
+cols <- acvd_colors
+names(cols) <- unique(samdat_tbl(akk)$ACVD)
+
+htmp <- akk %>% tax_agg(rank='Species') %>%
+  tax_reorder(tax_order = akk_order2) %>%
+  tax_transform("compositional", rank = "Species") %>%
+  comp_heatmap(taxa = akk_order2,
+               samples = akk_samp,
+               taxon_renamer = function(x) stringr::str_replace(stringr::str_replace(x, "Akkermansia_","A. "),"sp_N21116","guangxiensis"),
+               #colors = heat_palette(rev=TRUE, breaks=8),
+               colors = heat_palette(palette = colorRampPalette(c('white','steelblue','red4'))(10)),
+               cluster_rows = FALSE,
+               tax_seriation = 'Identity',
+               #tax_anno = taxAnnotation(Prev. = anno_tax_prev(bar_width = 0.3, size=grid::unit(1,'cm'))),
+               sample_anno = sampleAnnotation(ACVD = anno_sample_cat('ACVD', col=cols)),
+               row_names_gp = grid::gpar(fontsize = 10),
+               heatmap_legend_param = list(at = 0:5 / 5,
+                                           direction = "horizontal", title_position = "leftcenter",
+                                           legend_width = grid::unit(4, "cm"),
+                                           grid_height = grid::unit(5, "mm")))
+
+#png(file='~/Documents/WORK/2026.01.30_ACVD_metagenomics/figures/akkermansia_heatmap.png',
+#    width=10,height=4,units='in',res=600)
+
+ComplexHeatmap::draw(
+  object = htmp,
+  heatmap_legend_side = 'bottom',
+  annotation_legend_list = attr(htmp, "AnnoLegends"), merge_legends = TRUE
+)
+
+
