@@ -11,60 +11,244 @@ output:
       highlightLines: true
       countIncrementalSlides: false
       ratio: "16:9"
+editor_options: 
+  chunk_output_type: console
 ---
 
-# Agenda
+```{r, eval=TRUE, echo=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, ## Code
+  include = TRUE,
+  message = FALSE, warning = FALSE, error = FALSE,
+  out.height = "70%", fig.align = "center", fig.dpi = 300,
+  cache = FALSE, cache.lazy = FALSE
+)
+```
+
+```{r}
+## Packages
+suppressPackageStartupMessages({suppressWarnings({
+  library(dplyr)
+  library(ggplot2)
+  # library(phyloseq)
+  # library(vegan)
+})})
+options(tidyverse.quiet = TRUE)
+theme_set(theme_bw())
+here::i_am("BetaSpaces_Presentation.Rmd")
+
+## Load artifacts
+.verb <- ifelse(interactive(), TRUE, FALSE)
+load(file = here::here(
+  "./zScratchpad/ACVD_Inputs/outputs/ns_diversity_spaces.rda"), verbose = .verb)
+```
+
+# Terminology
+
+- Mixed audiences; write Biology and interpret to Statistics
+
+```{r, echo=FALSE}
+tribble(
+  ~Term,             ~Alias,                     ~Notaion_dimension,
+  "Sample",          "Site, Observation, Row",   "n",
+  "Variable",        "Colunm, feature, Metric",  "p", # "Dimension",
+  "Abundance table", "Data",                     "n x p",
+  "Meta data",       "Demographic data",         "n rows",
+  "Distance",        "Dissimilarity",            "n x ~n*",
+  "Ordination",      "Embedding, reduced scape", "n x d, where d <= ~n"
+) %>%
+  knitr::kable() %>%
+  kableExtra::footnote(
+    general = "* Biological distances sometimes don't meet the triangle inequality, leading to negative some eigenvalues. By default, most implementations drop negative eigenvalued components rather than diluting the others by adding the difference to all eigenvalues.",
+    #general_title = "", 
+    fixed_small_size = TRUE)
+```
+
+---
+
+# Ecological Taxonomic Diversity
+
+- *Alpha diversity(1), α,* richness and evenness within a site/sample
+    - Typically choose 2-3 of 7 metrics, **visualized independently**
+- **Beta diversity(1), β,** compositional differences between sites/samples
+    - Typically *10s-1000s of components* (dissimilarity of taxa abundance), **visualized as 2 components of 1 or 2 ordination method**
+
+.footnote[
+(1) R. H. Whittaker (1960) Vegetation of the Siskiyou Mountains, Oregon and California. Ecological Monographs, 30, 279–338. doi:10.2307/1943563
+<br><br><br>
+]
+
+---
+
+# Ecological Taxonomic Diversity
+
+- *Alpha diversity(1), α,* richness and evenness within a site/sample
+    - Typically choose 2-3 of 7 metrics, **visualized independently**
+- **Beta diversity(1), β,** compositional differences between sites/samples
+    - Typically *10s-1000s of components* (dissimilarity of taxa abundance), **visualized as 2 components of 1 or 2 ordination method**
+- Gamma diversity(1), γ, total species diversity in a landscape, `γ = α × β`
+- (Zeta diversity(2), ζ, the degree of overlap in the type of taxa present between a set of observed sites/samples, overly sensitive to selection and order of sites/samples)
+
+.footnote[
+(1) R. H. Whittaker (1960) Vegetation of the Siskiyou Mountains, Oregon and California. Ecological Monographs, 30, 279–338. doi:10.2307/1943563
+
+(2) Hui, C., & McGeoch, M. A. (2014). Zeta diversity as a concept and metric that unifies incidence-based biodiversity patterns. The American Naturalist, 184(5), 684-694.
+]
+
+---
+
+# Alpha diversity, α
+
+- Richness describes the unique number of taxa
+- Evenness describes the distribution of taxa abundances
+- Diversity is a measure of both richness and evenness
+
+```{r, echo=FALSE}
+tribble(
+  ~Metric,      ~Class,      ~Context,  ~Description,
+  "Observed",   "Richness",  "Wide",    "Count of observed taxa. Sensitive to rare taxa",
+  "Shannon",    "Diversity", "Wide",    "Eveness and richness, log-based, range [0, log(n_tax)]",
+  "Simpson",    "Evenness",  "Wide",    "Prob two randomly selected individuals are different species, range [0, 1]",
+  "InvSimpson", "Evenness",  "+1",      "Inverse of Simpson (1/D). More intuitive scale",
+  "Chao1",      "Richness",  "Non-ASV", "Accounting for unseen rare species, better for undersampled data",
+  "ACE",        "Richness",  "Non-ASV", "Abundance-based Chao estimator, weights by abundance",
+  "Fisher",     "Diversity", "?",       "Parametric index balancing richness and evenness, assumes log-series") %>% knitr::kable()
+```
+
+---
+
+# The data
+
+Follow the gut microbiome analysis in Jie et al, 2017 (3). Observed 385 samples of the gut microbiome in individuals with Artherosclerotic CardioVascular Disease (ACVD, "heart disease") compared to healthy individuals in a Chinese cohort. For our purpose, **goal is to visualize for taxa associated differntially by heart disease.**
+
+- Data: 370 obs x 2397 taxa (relative abundances) -- `otu_table(physeq)`
+- Metadata: 370 obs x 9 variables (Heart Disease, Sex, Age, Triglycerides, Cholesterols) -- `sample_data(physeq)`
+- Alpha diversity: 370 obs x 4 within-site measures of richness, evenness, and diversity -- `estimate_richness(physeq, measures = c("Observed", "Shannon", "InvSimpson", "Fisher")`
+
+
+.footnote[
+(3) Jie, Z., Xia, H., Zhong, S. L., Feng, Q., Li, S., Liang, S., ... & Kristiansen, K. (2017). The gut microbiome in atherosclerotic cardiovascular disease. Nature communications, 8(1), 845.
+]
+
+---
+
+# Alpha space
 
 .pull-left[
-### Conceptual
+Typically 2 to 7 alpha diversity metrics, visualized like...
 
-1. **Beta Diversity**: What & Why
-2. **Distance Metrics**: Bray-Curtis, Aitchison
-3. **Ordination**: Mapping to 2D space
+````
+estimate_richness(...) %>%
+  as_tibble(rownames = "SampleID") %>%
+  left_join(metadata) %>%
+  pivot_longer() %>%
+  ggplot() + ...
+````
 
-### Technical
-
-4. **Distance Matrix → PCoA**
-5. **Distance Matrix → CAP**
-6. **Comparison with PCA & LDA**
+Apply apropriate  statistial test, *eg.* T, Wilcoxon, Kurskal-Wallis, or Baysian variants
 ]
 
 .pull-right[
-### Applications
+```{r, echo=F, fig.dpi=300}
+# viridis::viridis(2, option = "A", begin = 0.3, end = 0.7) %>% dput()
+acvd_colors <- c("#641A80FF", "#F76F5CFF")
+ggplot(jia_alpha_long) +
+  geom_boxplot(aes(x = ACVD, y = value, fill = ACVD)) +
+  ylab('Alpha Diversity') +
+  scale_fill_manual(values = acvd_colors) +
+  facet_wrap(~Diversity_Measure, scales = 'free') +
+  theme_bw()
+```
+]
 
-7. **Current Practice** (Jie et al. 2017)
-8. **phyloseq Implementation**
-9. **When to use each method**
+
+---
+
+# Alpha space 2
+
+.pull-left[
+## Recomendations
+
+1. Move from `geom_boxplot()` to `geom_violin() + geom_jitter()`
+1. `viridis` palette was relatively color-blind friendly, alternatively color-blind 
+friendly palettes with `scale_color_brewer()` and `scale_fill_brewer()`
+1. Consider adding arrows to indicate domain prefered directions, esp when 
+audiences may not be familar with all metrics
+]
+
+.pull-right[
+```{r}
+y_ranges <- jia_alpha_long |>
+  group_by(Diversity_Measure) |>
+  summarise(y_min = min(value, na.rm = TRUE),
+            y_max = max(value, na.rm = TRUE),
+            .groups = "drop") |>
+  mutate(
+    arrow_y_start = y_min + 0.05 * (y_max - y_min),
+    arrow_y_end = y_max - 0.05 * (y_max - y_min))
+
+ggplot(jia_alpha_long) +
+  geom_violin(aes(x = ACVD, y = value, fill = ACVD), alpha = .3) +
+  geom_jitter(aes(x = ACVD, y = value, color = ACVD)) +
+  ## Arrows
+  geom_segment(
+    data = y_ranges,
+    aes(x = .5, xend = .5, y = arrow_y_start, yend = arrow_y_end),
+    arrow = arrow(ends = "last", length = unit(0.3, "cm"), type = "closed"),
+    color = "green4", size = 1, inherit.aes = FALSE) +
+  ylab('Alpha Diversity') +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~Diversity_Measure, scales = 'free') +
+  theme_bw()
+```
 ]
 
 ---
 
-# Beta Diversity: The Concept
-
-## Definition
-
-**Beta diversity** = **β-diversity** = compositional differences between samples
-
---
+# Alpha space 3
 
 .pull-left[
-### Measures Presence/Absence & Abundance
+## Recomendations
 
-- How different is sample A from sample B?
-- Sample X vs Sample Y: composition differs
-- Accounts for:
-  - Which taxa are present
-  - How abundant they are
+- More information when pairing metrics:
+    - **Visualize where evenness and richness disagree**
+    - 2d Scatter plot with tooltips on sample/site & metadata with `plotly::ggplotly()`
+    - Scatterplot matrix(4) (aka SPLOM, pairs plot), `GGally::ggpairs()` (right)
+
+
+.footnote[
+(4) Hartigan, J. A. (1975). Clustering algorithms.
+John Wiley & Sons, Inc..
+]
 ]
 
 .pull-right[
-### Contrasts with Alpha Diversity
+```{r}
+GGally::ggpairs(jia_alpha_wide, columns = 2:5,
+                aes(color = ACVD, fill = ACVD, shape = ACVD)) +
+  scale_color_brewer(palette = "Dark2")
+```
+]
 
-| Alpha | Beta |
-|-------|------|
-| **Within** sample | **Between** samples |
-| Richness/Evenness | Compositional difference |
-| One number per sample | Pairwise distances |
+
+---
+
+# Beta diversity
+
+TODO
+
+Distance (`vegdist(otu_table(physeq), method = "bray")`): Bray-Curtis dissimilarity, 2395 x 2296 taxa
+Ordination PCoa (`ordinate(physeq, distance = "bray", method = "PCoA")`): 370 obs x 211 PCoA Components
+
+
+<!-- with a particular focus on Akkermansia sp. -->
+
+-----
+
+.footnote[
+Jie, Z., Xia, H., Zhong, S. L., Feng, Q., Li, S., Liang, S., ... & Kristiansen, K. (2017). The gut microbiome in atherosclerotic cardiovascular disease. Nature communications, 8(1), 845. 
+(1805 citations 6/26/2026) 
 ]
 
 ---
@@ -344,32 +528,7 @@ CAP:
 
 ## Workflow in R
 
-```{r, eval=TRUE, echo=FALSE}
-library(phyloseq)
-library(vegan)
 
-# Load phyloseq object
-physeq <- metaphlan_physeq(metadata_file = metadata_file,
-                           metaphlan_file = metaphlan_unclass,
-                           sample_header = 'SRA',
-                           rm_samples = c(bad_samples, 'ERR2017627'))
-
-# 1. Calculate Bray-Curtis distance
-dist_matrix <- phyloseq::distance(physeq, method = "bray")
-
-# 2. PCoA ordination
-pcoa_result <- phyloseq::ordinate(
-  physeq, 
-  method = "PCoA",
-  distance = "bray"
-)
-
-# 3. Extract coordinates
-pcoords <- scores(pcoa_result)
-
-# 4. Plot
-plot_ordination(physeq, pcoa_result, color = "ACVD")
-```
 
 ---
 
@@ -377,7 +536,7 @@ plot_ordination(physeq, pcoa_result, color = "ACVD")
 
 ## Constrained Ordination
 
-```{r, eval=TRUE, echo=FALSE}
+```{r, eval=FALSE, echo=FALSE}
 # CAP with metadata constraints
 cap_result <- phyloseq::ordinate(
   physeq,
@@ -403,7 +562,7 @@ plot_ordination(physeq, cap_result, color = "ACVD")
 
 ## Compositionally-aware PCoA
 
-```{r, eval=TRUE, echo=FALSE}
+```{r, eval=FALSE, echo=FALSE}
 # Using microViz for modern workflow
 physeq |>
   tax_transform("identity", rank = "Species") |>
@@ -423,7 +582,7 @@ physeq |>
 
 ## PCoA Plot (Bray-Curtis)
 
-```{r, eval=TRUE, echo=FALSE}
+```{r, eval=FALSE, echo=FALSE}
 # From ACVD_reprex.Rmd (line 515)
 physeq.beta <- phyloseq::ordinate(
   full_meta, 

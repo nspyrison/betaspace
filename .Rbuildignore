@@ -3,3 +3,7 @@
 ^pkgdown$
 
 zGitIgnore
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.positai$
+^\.claude$

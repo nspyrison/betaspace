@@ -469,15 +469,15 @@ full_meta <- microViz::ps_filter(physeq, !is.na(Gender) & !is.na(Age),
                                  .keep_all_taxa = TRUE)
 
 alpha.df <- phyloseq::estimate_richness(
-  full_meta, measures = c("Shannon", "Simpson", "Observed")) %>%
+  full_meta, measures = c("Shannon", "InvSimpson", "Observed", "Fisher")) %>%
   as_tibble(rownames = "SampleID") %>%
   left_join(phyloseq::sample_data(physeq), by = 'SampleID')
 
 alpha.df.l <- alpha.df %>%
-  pivot_longer(cols = c("Shannon", "Simpson", "Observed"),
+  pivot_longer(cols = c("Shannon", "InvSimpson", "Observed", "Fisher"),
                names_to = 'Diversity_Measure', values_to = 'value')
 
-alpha.box1 <- ggplot(alpha.df.l %>% filter(Diversity_Measure != 'Simpson')) +
+alpha.box1 <- ggplot(alpha.df.l) +
   geom_boxplot(aes(y = value, fill = ACVD)) +
   ylab('Alpha Diversity') +
   scale_fill_manual(values = acvd_colors) +
@@ -511,8 +511,15 @@ Beta diversity assesses differences in microbiome composition between different 
 
 ```{r beta, fig.cap="Figure 3.2: PCA of Beta-diversity (Bray-Curtis) colored by ACVD status. Ellipses represent 99% confidence interval for samples from each group."}
 # bray curtis distance
-physeq.beta <- phyloseq::ordinate(full_meta, method = 'PCoA', distance = 'bray', )
+physeq.beta <- phyloseq::ordinate(full_meta, method = 'PCoA', distance = 'bray')
 #scree_df(physeq.beta)
+
+#' @examples
+#' # Quest for distance matrix 
+#' ## Try to get dist...
+#' physeq.beta$call$distance
+#' ## Null..., so recreate it...
+#' bray_dist <- vegan::vegdist(phyloseq::otu_table(full_meta), method = "bray")
 
 
 p <- physeq %>%
@@ -528,23 +535,26 @@ p <- physeq %>%
   ggside::geom_ysidedensity(aes(fill = ACVD), alpha = 0.5, show.legend = FALSE) +
   ggside::theme_ggside_void()
 
-scree_df()
-scree_df <- tibble(
-  comp_num = 1:length(physeq.beta$values$Eigenvalues),
-  comp_nm = paste0("PCoA ", comp_num),
-  var = physeq.beta$values$Eigenvalues,
-  pct_var = var / sum(var) * 100,
-  pct_cumvar = cumsum(pct_var)
-)
-d_80pct_var <- scree_df |>
-  filter(pct_cumvar >= 80) |>
-  slice(1) ## 42  :(
-#d_math <- ide_math(pca.df[, -1]) %>% median(na.rm = TRUE) %>% round() #4
+
+#' @examples
+#' scree_df <- tibble(
+#'   comp_num = 1:length(physeq.beta$values$Eigenvalues),
+#'   comp_nm = paste0("PCoA ", comp_num),
+#'   var = physeq.beta$values$Eigenvalues,
+#'   pct_var = var / sum(var) * 100,
+#'   pct_cumvar = cumsum(pct_var)
+#' )
+#' d_80pct_var <- scree_df |>
+#'   filter(pct_cumvar >= 80) |>
+#'   slice(1) ## 42  :(
+#' d_math <- ide_math(pca.df[, -1]) %>% median(na.rm = TRUE) %>% round() #4
 "Yeah, nah, round median ide_math of d=220 beta space was 4, lets use that"
 d <- 4
 
+# This returns a numeric vector of the percentages (e.g., 12.01, 7.30)
+pct_exp <- round(physeq.beta$values$Relative_eig[1:d] * 100, 1)
 pca.df <- data.frame(physeq.beta$vectors)
-colnames(pca.df) <- paste0("PCoA", 1:ncol(pca.df))
+colnames(pca.df) <- paste0("PC", 1:ncol(pca.df), " (", pct_exp, "%)")
 pca.df <- tibble(pca.df[, 1:d],
                  SampleID = rownames(pca.df))
 
@@ -552,23 +562,18 @@ pca.df <- left_join(pca.df, metadata, by = 'SampleID') %>%
   mutate(bmi_bin = cut(BMI, breaks = c(0, 18, 25, 30, 35, 40, 50, 70),
                        include.lowest = TRUE, right = FALSE, dig.lab = 4))
 
-
-
 # flat plots
 #' @examples
 #' pca.legend <- ggplot(pca.df,aes(color=Treatment, shape=Timepoint)) +
 #'   geom_point()
 #' pca.legend
-
 pca.plot <- ggplot(pca.df) +
-  geom_point(aes(x = PCoA1, y = PCoA2, color = ACVD), size = 2.5) +
-  stat_ellipse(aes(x = PCoA1, y = PCoA2, color = ACVD),
+  geom_point(aes(x = `PC1 (12%)`, y = `PC2 (7.3%)`, color = ACVD), size = 2.5) +
+  stat_ellipse(aes(x = `PC1 (12%)`, y = `PC2 (7.3%)`, color = ACVD),
                level = 0.99, linewidth = 1) +
-  xlab(paste0("PC1 (", round(percent_explained[1], 1), "%)")) +
-  ylab(paste0("PC2 (", round(percent_explained[2], 1), "%)")) +
   scale_color_manual(values = acvd_colors) +
   my_gg_theme +
-  labs(subtitle = 'Bray-Curtis Distance')
+  labs(subtitle = 'PCoA1:2, Bray-Curtis Distance', color = "Heart\nDisease")
 pca.plot
 ```
 
@@ -848,8 +853,40 @@ ComplexHeatmap::draw(
 # 8 Save artifacts for presentation
 
 ```{r}
-alpha.df.l
+jia_alpha_wide <- alpha.df
+jia_alpha_long <- alpha.df.l
+jia_bray_pcoa <- physeq.beta
+jia_bray_pcoa_embed <- pca.df
 ```
+
+## 8.1 Make CAP
+
+```{r}
+# CAP with a simple constraint (e.g., ACVD status. Could also add any number of predictors)
+jie_bray_cap <- phyloseq::ordinate(
+  full_meta, method = 'CAP', distance = 'bray', formula = ~ ACVD)
+  
+# Different display options for CAP scores:
+# Sites (sample coordinates) - the main embedding
+jie_bray_cap_embed <- vegan::scores(
+  jie_bray_cap, display = "sites", choices = 1:9999) %>% as.data.frame()
+jie_bray_cap_embed <- tibble(
+  jie_bray_cap_embed[, 1:4],
+  SampleID = rownames(jie_bray_cap_embed))
+jie_bray_cap_embed <- left_join(jie_bray_cap_embed, metadata, by = 'SampleID') %>%
+  mutate(bmi_bin = cut(BMI, breaks = c(0, 18, 25, 30, 35, 40, 50, 70),
+                       include.lowest = TRUE, right = FALSE, dig.lab = 4))
+```
+
+## 8.2 Save
+
+```{r}
+save(jia_alpha_wide, jia_alpha_long,
+     jia_bray_pcoa, jia_bray_pcoa_embed, jie_bray_cap_embed,
+     file = paste0(proj_path, "outputs/ns_diversity_spaces.rda"))
+```
+
+
 
 
 # 9 Session Info

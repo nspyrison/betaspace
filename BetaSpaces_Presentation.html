@@ -4,10 +4,12 @@
     <title>Beta Diversity &amp; Ordination Spaces</title>
     <meta charset="utf-8" />
     <meta name="author" content="Microbiome Analysis Workshop" />
-    <meta name="date" content="2026-06-20" />
+    <meta name="date" content="2026-06-26" />
     <script src="BetaSpaces_Presentation_files/header-attrs-2.31/header-attrs.js"></script>
     <link href="BetaSpaces_Presentation_files/remark-css-0.0.1/default.css" rel="stylesheet" />
     <link href="BetaSpaces_Presentation_files/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+    <script src="BetaSpaces_Presentation_files/kePrint-0.0.1/kePrint.js"></script>
+    <link href="BetaSpaces_Presentation_files/lightable-0.0.1/lightable.css" rel="stylesheet" />
   </head>
   <body>
     <textarea id="source">
@@ -23,64 +25,214 @@ class: center, middle, inverse, title-slide
 ### Microbiome Analysis Workshop
 ]
 .date[
-### 2026-06-20
+### 2026-06-26
 ]
 
 ---
 
 
-# Agenda
 
-.pull-left[
-### Conceptual
 
-1. **Beta Diversity**: What &amp; Why
-2. **Distance Metrics**: Bray-Curtis, Aitchison
-3. **Ordination**: Mapping to 2D space
 
-### Technical
 
-4. **Distance Matrix → PCoA**
-5. **Distance Matrix → CAP**
-6. **Comparison with PCA &amp; LDA**
-]
+# Terminology
 
-.pull-right[
-### Applications
+- Mixed audiences; write Biology and interpret to Statistics
 
-7. **Current Practice** (Jie et al. 2017)
-8. **phyloseq Implementation**
-9. **When to use each method**
+&lt;table style="NAborder-bottom: 0;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Term &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Alias &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Notaion_dimension &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Sample &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Site, Observation, Row &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; n &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Variable &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Colunm, feature, Metric &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; p &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Abundance table &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Data &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; n x p &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Meta data &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Demographic data &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; n rows &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Distance &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Dissimilarity &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; n x ~n* &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Ordination &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Embedding, reduced scape &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; n x d, where d &amp;lt;= ~n &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;tfoot&gt;
+&lt;tr&gt;&lt;td style="padding: 0; " colspan="100%"&gt;&lt;span style="font-style: italic;"&gt;Note: &lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style="padding: 0; " colspan="100%"&gt;
+&lt;sup&gt;&lt;/sup&gt; * Biological distances sometimes don't meet the triangle inequality, leading to negative some eigenvalues. By default, most implementations drop negative eigenvalued components rather than diluting the others by adding the difference to all eigenvalues.&lt;/td&gt;&lt;/tr&gt;
+&lt;/tfoot&gt;
+&lt;/table&gt;
+
+---
+
+# Ecological Taxonomic Diversity
+
+- *Alpha diversity(1), α,* richness and evenness within a site/sample
+    - Typically choose 2-3 of 7 metrics, **visualized independently**
+- **Beta diversity(1), β,** compositional differences between sites/samples
+    - Typically *10s-1000s of components* (dissimilarity of taxa abundance), **visualized as 2 components of 1 or 2 ordination method**
+
+.footnote[
+(1) R. H. Whittaker (1960) Vegetation of the Siskiyou Mountains, Oregon and California. Ecological Monographs, 30, 279–338. doi:10.2307/1943563
+&lt;br&gt;&lt;br&gt;&lt;br&gt;
 ]
 
 ---
 
-# Beta Diversity: The Concept
+# Ecological Taxonomic Diversity
 
-## Definition
+- *Alpha diversity(1), α,* richness and evenness within a site/sample
+    - Typically choose 2-3 of 7 metrics, **visualized independently**
+- **Beta diversity(1), β,** compositional differences between sites/samples
+    - Typically *10s-1000s of components* (dissimilarity of taxa abundance), **visualized as 2 components of 1 or 2 ordination method**
+- Gamma diversity(1), γ, total species diversity in a landscape, `γ = α × β`
+- (Zeta diversity(2), ζ, the degree of overlap in the type of taxa present between a set of observed sites/samples, overly sensitive to selection and order of sites/samples)
 
-**Beta diversity** = **β-diversity** = compositional differences between samples
+.footnote[
+(1) R. H. Whittaker (1960) Vegetation of the Siskiyou Mountains, Oregon and California. Ecological Monographs, 30, 279–338. doi:10.2307/1943563
 
---
+(2) Hui, C., &amp; McGeoch, M. A. (2014). Zeta diversity as a concept and metric that unifies incidence-based biodiversity patterns. The American Naturalist, 184(5), 684-694.
+]
+
+---
+
+# Alpha diversity, α
+
+- Richness describes the unique number of taxa
+- Evenness describes the distribution of taxa abundances
+- Diversity is a measure of both richness and evenness
+
+
+|Metric     |Class     |Context |Description                                                                |
+|:----------|:---------|:-------|:--------------------------------------------------------------------------|
+|Observed   |Richness  |Wide    |Count of observed taxa. Sensitive to rare taxa                             |
+|Shannon    |Diversity |Wide    |Eveness and richness, log-based, range [0, log(n_tax)]                     |
+|Simpson    |Evenness  |Wide    |Prob two randomly selected individuals are different species, range [0, 1] |
+|InvSimpson |Evenness  |+1      |Inverse of Simpson (1/D). More intuitive scale                             |
+|Chao1      |Richness  |Non-ASV |Accounting for unseen rare species, better for undersampled data           |
+|ACE        |Richness  |Non-ASV |Abundance-based Chao estimator, weights by abundance                       |
+|Fisher     |Diversity |?       |Parametric index balancing richness and evenness, assumes log-series       |
+
+---
+
+# The data
+
+Follow the gut microbiome analysis in Jie et al, 2017 (3). Observed 385 samples of the gut microbiome in individuals with Artherosclerotic CardioVascular Disease (ACVD, "heart disease") compared to healthy individuals in a Chinese cohort. For our purpose, **goal is to visualize for taxa associated differntially by heart disease.**
+
+- Data: 370 obs x 2397 taxa (relative abundances) -- `otu_table(physeq)`
+- Metadata: 370 obs x 9 variables (Heart Disease, Sex, Age, Triglycerides, Cholesterols) -- `sample_data(physeq)`
+- Alpha diversity: 370 obs x 4 within-site measures of richness, evenness, and diversity -- `estimate_richness(physeq, measures = c("Observed", "Shannon", "InvSimpson", "Fisher")`
+
+
+.footnote[
+(3) Jie, Z., Xia, H., Zhong, S. L., Feng, Q., Li, S., Liang, S., ... &amp; Kristiansen, K. (2017). The gut microbiome in atherosclerotic cardiovascular disease. Nature communications, 8(1), 845.
+]
+
+---
+
+# Alpha space
 
 .pull-left[
-### Measures Presence/Absence &amp; Abundance
+Typically 2 to 7 alpha diversity metrics, visualized like...
 
-- How different is sample A from sample B?
-- Sample X vs Sample Y: composition differs
-- Accounts for:
-  - Which taxa are present
-  - How abundant they are
+````
+estimate_richness(...) %&gt;%
+  as_tibble(rownames = "SampleID") %&gt;%
+  left_join(metadata) %&gt;%
+  pivot_longer() %&gt;%
+  ggplot() + ...
+````
+
+Apply apropriate  statistial test, *eg.* T, Wilcoxon, Kurskal-Wallis, or Baysian variants
 ]
 
 .pull-right[
-### Contrasts with Alpha Diversity
+&lt;img src="BetaSpaces_Presentation_files/figure-html/unnamed-chunk-5-1.png" alt="" height="70%" style="display: block; margin: auto;" /&gt;
+]
 
-| Alpha | Beta |
-|-------|------|
-| **Within** sample | **Between** samples |
-| Richness/Evenness | Compositional difference |
-| One number per sample | Pairwise distances |
+
+---
+
+# Alpha space 2
+
+.pull-left[
+## Recomendations
+
+1. Move from `geom_boxplot()` to `geom_violin() + geom_jitter()`
+1. `viridis` palette was relatively color-blind friendly, alternatively color-blind 
+friendly palettes with `scale_color_brewer()` and `scale_fill_brewer()`
+1. Consider adding arrows to indicate domain prefered directions, esp when 
+audiences may not be familar with all metrics
+]
+
+.pull-right[
+&lt;img src="BetaSpaces_Presentation_files/figure-html/unnamed-chunk-6-1.png" alt="" height="70%" style="display: block; margin: auto;" /&gt;
+]
+
+---
+
+# Alpha space 3
+
+.pull-left[
+## Recomendations
+
+- More information when pairing metrics:
+    - **Visualize where evenness and richness disagree**
+    - 2d Scatter plot with tooltips on sample/site &amp; metadata with `plotly::ggplotly()`
+    - Scatterplot matrix(4) (aka SPLOM, pairs plot), `GGally::ggpairs()` (right)
+
+
+.footnote[
+(4) Hartigan, J. A. (1975). Clustering algorithms.
+John Wiley &amp; Sons, Inc..
+]
+]
+
+.pull-right[
+&lt;img src="BetaSpaces_Presentation_files/figure-html/unnamed-chunk-7-1.png" alt="" height="70%" style="display: block; margin: auto;" /&gt;
+]
+
+
+---
+
+# Beta diversity
+
+TODO
+
+Distance (`vegdist(otu_table(physeq), method = "bray")`): Bray-Curtis dissimilarity, 2395 x 2296 taxa
+Ordination PCoa (`ordinate(physeq, distance = "bray", method = "PCoA")`): 370 obs x 211 PCoA Components
+
+
+&lt;!-- with a particular focus on Akkermansia sp. --&gt;
+
+-----
+
+.footnote[
+Jie, Z., Xia, H., Zhong, S. L., Feng, Q., Li, S., Liang, S., ... &amp; Kristiansen, K. (2017). The gut microbiome in atherosclerotic cardiovascular disease. Nature communications, 8(1), 845. 
+(1805 citations 6/26/2026) 
 ]
 
 ---
@@ -150,9 +302,9 @@ dist_matrix &lt;-
 
 **Original distances** → **2D coordinates**
 
-- Minimize information loss
+- Minimize information loss (-- Really?)
 - Preserve relative distances
-- Interpretable axes
+- Interpretable axes (-- Really?)
 
 ---
 
@@ -229,66 +381,15 @@ dist_matrix &lt;-
 
 # Comparison: nxp Data Processing
 
-&lt;table&gt;
- &lt;thead&gt;
-  &lt;tr&gt;
-   &lt;th style="text-align:left;"&gt; Aspect &lt;/th&gt;
-   &lt;th style="text-align:left;"&gt; PCA &lt;/th&gt;
-   &lt;th style="text-align:left;"&gt; PCoA &lt;/th&gt;
-   &lt;th style="text-align:left;"&gt; CAP &lt;/th&gt;
-  &lt;/tr&gt;
- &lt;/thead&gt;
-&lt;tbody&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Input &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Abundance table (n × p) &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Distance matrix (n × n) &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Distance matrix + metadata &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Distance metric &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; None (Euclidean implicit) &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Any (Bray, Aitchison, etc.) &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Any (Bray, Aitchison, etc.) &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Eigenvalues &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Always ≥ 0 &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Can be negative &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Can be negative &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; First axis captures &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Max variance in abundance &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Best approximate distances &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Metadata-constrained variance &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Handles compositional data &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Not well &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes (metric-dependent) &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes (metric-dependent) &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Requires metadata &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; No &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; No &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes (required) &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Good for visualization &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-   &lt;td style="text-align:left;"&gt; Good for hypothesis testing &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Limited &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
-   &lt;td style="text-align:left;"&gt; Yes &lt;/td&gt;
-  &lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
+|   | PCA | LDA | PCoA | CAP |
+|---|-----|-----|------|-----|
+| **Input** | Abundance table (n × p) | Abundance table + metadata | Distance matrix (n × n) | Distance matrix + metadata |
+| **Distance metric** | None (Euclidean implicit) | None (Euclidean implicit) | Any (Bray, Aitchison, etc.) | Any (Bray, Aitchison, etc.) |
+| **Eigenvalues** | Always ≥ 0 | Always ≥ 0 | Can be negative | Can be negative |
+| **First axis captures** | Max variance in abundance | Separation between clusters | Best approximate distances | Metadata-constrained variance |
+| **Handles compositional data** | Not well | Not well | Yes (metric-dependent) | Yes (metric-dependent) |
+| **Requires metadata** | No |  Yes (required) | No | Yes (required) |
+| **Linear basis** | Yes | Yes | No (projects sites somehow) | No (projects sites somehow) |
 
 ---
 
@@ -298,9 +399,9 @@ dist_matrix &lt;-
 
 ```
 ┌───────────────────────────────────┐
-│ Sample₁: [0.3, 0.1, 0.5, ...]    │
-│ Sample₂: [0.2, 0.4, 0.3, ...]    │
-│ Sample₃: [0.1, 0.2, 0.6, ...]    │
+│ Sample₁: [0.3, 0.1, 0.5, ...]     │
+│ Sample₂: [0.2, 0.4, 0.3, ...]     │
+│ Sample₃: [0.1, 0.2, 0.6, ...]     │
 │ ...                               │
 └───────────────────────────────────┘
 
@@ -405,29 +506,6 @@ CAP:
 ## Workflow in R
 
 
-``` r
-library(phyloseq)
-library(vegan)
-
-# Load phyloseq object
-physeq &lt;- # your data
-
-# 1. Calculate Bray-Curtis distance
-dist_matrix &lt;- phyloseq::distance(physeq, method = "bray")
-
-# 2. PCoA ordination
-pcoa_result &lt;- phyloseq::ordinate(
-  physeq, 
-  method = "PCoA",
-  distance = "bray"
-)
-
-# 3. Extract coordinates
-pcoords &lt;- scores(pcoa_result)
-
-# 4. Plot
-plot_ordination(physeq, pcoa_result, color = "ACVD")
-```
 
 ---
 
@@ -436,25 +514,6 @@ plot_ordination(physeq, pcoa_result, color = "ACVD")
 ## Constrained Ordination
 
 
-``` r
-# CAP with metadata constraints
-cap_result &lt;- phyloseq::ordinate(
-  physeq,
-  method = "CAP",
-  distance = "bray",
-  formula = ~ ACVD + Age + Gender
-)
-
-# Extract variance explained
-# (shows % explained by constraints)
-cap_result$inertia$constrained_perc
-
-# Test significance (PERMANOVA)
-anova(cap_result)
-
-# Plot
-plot_ordination(physeq, cap_result, color = "ACVD")
-```
 
 ---
 
@@ -463,19 +522,6 @@ plot_ordination(physeq, cap_result, color = "ACVD")
 ## Compositionally-aware PCoA
 
 
-``` r
-# Using microViz for modern workflow
-physeq |&gt;
-  tax_transform("identity", rank = "Species") |&gt;
-  dist_calc(dist = "aitchison") |&gt;
-  ord_calc("PCoA") |&gt;
-  ord_plot(color = "ACVD")
-
-# Under the hood:
-# 1. CLR-transform abundances
-# 2. Compute Euclidean distance
-# 3. PCoA on Euclidean distances
-```
 
 ---
 
@@ -484,20 +530,6 @@ physeq |&gt;
 ## PCoA Plot (Bray-Curtis)
 
 
-``` r
-# From ACVD_reprex.Rmd (line 515)
-physeq.beta &lt;- phyloseq::ordinate(
-  full_meta, 
-  method = 'PCoA', 
-  distance = 'bray'
-)
-
-pca.plot &lt;- ggplot(pca.df) +
-  geom_point(aes(x = PCoA1, y = PCoA2, color = ACVD), size = 2.5) +
-  stat_ellipse(aes(x = PCoA1, y = PCoA2, color = ACVD), 
-               level = 0.99) +
-  xlab(paste0("PC1 (", round(percent_explained[1], 1), "%)"))
-```
 
 **Finding**: Modest separation by ACVD status, ellipses overlap considerably
 
