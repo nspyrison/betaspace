@@ -853,10 +853,10 @@ ComplexHeatmap::draw(
 # 8 Save artifacts for presentation
 
 ```{r}
-jia_alpha_wide <- alpha.df
-jia_alpha_long <- alpha.df.l
-jia_bray_pcoa <- physeq.beta
-jia_bray_pcoa_embed <- pca.df
+jie_alpha_wide <- alpha.df
+jie_alpha_long <- alpha.df.l
+jie_bray_pcoa <- physeq.beta
+jie_bray_pcoa_embed <- pca.df
 ```
 
 ## 8.1 Make CAP
@@ -881,8 +881,8 @@ jie_bray_cap_embed <- left_join(jie_bray_cap_embed, metadata, by = 'SampleID') %
 ## 8.2 Save
 
 ```{r}
-save(jia_alpha_wide, jia_alpha_long,
-     jia_bray_pcoa, jia_bray_pcoa_embed, jie_bray_cap_embed,
+save(jie_alpha_wide, jie_alpha_long,
+     jie_bray_pcoa, jie_bray_pcoa_embed, jie_bray_cap_embed,
      file = paste0(proj_path, "outputs/ns_diversity_spaces.rda"))
 ```
 
